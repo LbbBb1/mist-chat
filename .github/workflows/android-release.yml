@@ -94,7 +94,18 @@ jobs:
             echo "::error::Missing SIGNING_KEYSTORE_BASE64 secret. Configure it in Repository Settings -> Secrets -> Actions so the APK shares the exact upgrade signature."
             exit 1
           fi
-          echo "$SIGNING_KEYSTORE_BASE64" | base64 --decode > android/release.keystore
+          node -e "
+            const fs = require('node:fs');
+            const raw = (process.env.SIGNING_KEYSTORE_BASE64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+            const buf = Buffer.from(raw, 'base64');
+            console.log('Decoded keystore bytes:', buf.length);
+            if (buf.length < 100) {
+              console.error('Decoded keystore looks too small or invalid.');
+              process.exit(1);
+            }
+            fs.writeFileSync('android/release.keystore', buf);
+          "
+          keytool -list -keystore android/release.keystore -storepass "${{ secrets.SIGNING_KEYSTORE_PASS || 'android' }}" -alias "${{ secrets.SIGNING_KEY_ALIAS || 'androiddebugkey' }}" > /dev/null
 
       - name: Build signed Release APK
         env:
