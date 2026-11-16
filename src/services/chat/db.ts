@@ -38,7 +38,9 @@ const storedSummary = (session: Session): StoredSessionSummary => ({
   fileIds: [
     ...new Set(
       session.messages.flatMap((message) =>
-        message.role === 'user' ? message.files.map((file) => file.id) : []
+        message.role === 'user'
+          ? message.files.map((file) => file.id)
+          : message.blocks.flatMap((block) => (block.type === 'image' ? [block.fileId] : []))
       )
     ),
   ],
@@ -80,6 +82,8 @@ export const loadSessionSummaries = async (): Promise<SessionSummary[]> =>
 
 export const loadSession = async (id: string): Promise<Session | undefined> =>
   (await getDB()).get('sessions', id)
+
+export const loadAllSessions = async (): Promise<Session[]> => (await getDB()).getAll('sessions')
 
 export const saveSession = async (session: Session, files: StoredFile[] = []): Promise<void> => {
   const summary = storedSummary(session)
@@ -169,6 +173,14 @@ export const clearStaging = async (): Promise<void> => {
 
 export const addStagingSession = async (session: Session): Promise<void> => {
   await (await getDB()).add('sessionsStaging', session)
+}
+
+export const addStagingSessions = async (sessions: Session[]): Promise<void> => {
+  if (sessions.length === 0) {
+    return
+  }
+  const tx = (await getDB()).transaction('sessionsStaging', 'readwrite')
+  await Promise.all([...sessions.map((session) => tx.store.put(session)), tx.done])
 }
 
 export const saveStagingFiles = (files: StoredFile[]): Promise<void> =>

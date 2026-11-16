@@ -4,6 +4,7 @@ import { memo, useLayoutEffect, useRef, useState } from 'react'
 import { useIsMobile } from '../../app/viewport.js'
 import { IconEditOutline16 } from '../base/icons.js'
 import { editMessage, retryUpload } from '../../services/chat/store.js'
+import { matchesRefusalKeyword } from '../../services/settings.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { UserMessage as UserMessageType } from '../../services/chat/types.js'
 import { Button } from '../base/Button.js'
@@ -54,7 +55,12 @@ export const UserMessage = memo(function UserMessage({
   }, [editing, draft])
 
   const sendEdit = () => {
-    if (canSend && ensureApiKey() && editMessage(sessionId, message.id, draft.trim())) {
+    const text = draft.trim()
+    if (
+      canSend &&
+      (matchesRefusalKeyword(text) || ensureApiKey()) &&
+      editMessage(sessionId, message.id, text)
+    ) {
       stopReadAloud()
       setEditing(false)
     }

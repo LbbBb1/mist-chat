@@ -1,12 +1,14 @@
 import clsx from 'clsx'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
   IconDownloadOutline16,
+  IconEditOutline16,
   IconFollowsystemOutline16,
   IconLightOutline16,
   IconSettingsOutline16,
+  IconThinkOutline16,
   IconUploadOutline14,
 } from '../base/icons.js'
 import {
@@ -20,19 +22,40 @@ import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
   isChineseBrowser,
+  setAutoCheckUpdate,
+  setDailyTokenLimit,
   setLocale,
   setLocation,
   setThemePreference,
+  setTokenLimitEnabled,
   setTtsVoice,
   useSettings,
   type ThemePreference,
 } from '../../services/settings.js'
-import { useTranslate, type TranslationKey, type TranslationMessage } from '../../i18n/index.js'
+import {
+  resetDailyTokenUsage,
+  syncDailyTokenDate,
+  useDailyTokenUsage,
+} from '../../services/tokenUsage.js'
+import {
+  checkForUpdates,
+  getCurrentAppVersion,
+  openUpdateModal,
+  useUpdater,
+} from '../../services/updater.js'
+import {
+  translate,
+  useTranslate,
+  type TranslationKey,
+  type TranslationMessage,
+} from '../../i18n/index.js'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
-import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
+import { useApiKeyEditor } from './ApiKeyField.js'
+import { MemorySettings } from './MemorySettings.js'
+import { ModelSettings } from './ModelSettings.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import styles from './Settings.module.css'
 
@@ -50,6 +73,16 @@ const sections: { value: SettingsSection; label: TranslationKey; icon: ReactNode
     value: 'general',
     label: 'settingDialogAsideGeneralOptionLabel',
     icon: <IconSettingsOutline16 />,
+  },
+  {
+    value: 'model',
+    label: 'settingDialogAsideModelOptionLabel',
+    icon: <IconThinkOutline16 />,
+  },
+  {
+    value: 'memory',
+    label: 'settingDialogAsideMemoryOptionLabel',
+    icon: <IconEditOutline16 />,
   },
   { value: 'data', label: 'settingDialogAsideDataOptionLabel', icon: <IconDataOutline16 /> },
 ]
@@ -69,11 +102,11 @@ const SettingsContent = () => {
     <>
       <Modal
         title={t('settings')}
-        closable
+        closable={!historyBusy}
         className={styles.dialog}
         mainClassName={styles.dialogMain}
         onClose={() => {
-          if (!historyDelete.busy) {
+          if (!historyBusy) {
             closeSettings()
           }
         }}
@@ -100,10 +133,15 @@ const SettingsContent = () => {
               <LocaleSetting />
               <TtsVoiceSetting />
               <LocationSetting />
+              <TokenLimitSetting />
+              <UpdateSetting />
             </>
+          ) : section === 'model' ? (
+            <ModelSettings apiKeyEditor={apiKeyEditor} isMobile={isMobile} />
+          ) : section === 'memory' ? (
+            <MemorySettings />
           ) : (
             <>
-              <ApiKeyField editor={apiKeyEditor} />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
               <SettingCell
@@ -121,7 +159,6 @@ const SettingsContent = () => {
                   </Button>
                 }
               />
-              {isMobile ? <ApiKeyConfirm editor={apiKeyEditor} /> : null}
             </>
           )}
         </div>
@@ -166,6 +203,176 @@ const DeleteAllConfirm = ({
     >
       {t('deleteAllSessionsModalDescription')}
     </Modal>
+  )
+}
+
+const TOKEN_PRESETS = [
+  { label: '50k', value: 50_000 },
+  { label: '100k', value: 100_000 },
+  { label: '500k', value: 500_000 },
+  { label: '1M', value: 1_000_000 },
+]
+
+const TokenLimitSetting = () => {
+  const t = useTranslate()
+  const tokenLimitEnabled = useSettings((state) => state.tokenLimitEnabled)
+  const dailyTokenLimit = useSettings((state) => state.dailyTokenLimit)
+  const totalTokens = useDailyTokenUsage((state) => state.totalTokens)
+  const inputTokens = useDailyTokenUsage((state) => state.inputTokens)
+  const outputTokens = useDailyTokenUsage((state) => state.outputTokens)
+  const [limitDraft, setLimitDraft] = useState(String(dailyTokenLimit))
+
+  useEffect(() => {
+    syncDailyTokenDate()
+  }, [])
+
+  useEffect(() => {
+    setLimitDraft(String(dailyTokenLimit))
+  }, [dailyTokenLimit])
+
+  const exceeded = tokenLimitEnabled && totalTokens >= dailyTokenLimit
+  const commitLimit = () => {
+    const n = Number(limitDraft.trim())
+    if (Number.isFinite(n) && n >= 1000) {
+      setDailyTokenLimit(n)
+    } else {
+      setLimitDraft(String(dailyTokenLimit))
+    }
+  }
+
+  return (
+    <>
+      <SettingCell
+        label={t('tokenLimitToggleLabel')}
+        description={t('tokenLimitToggleDesc', {
+          total: totalTokens.toLocaleString(),
+          input: inputTokens.toLocaleString(),
+          output: outputTokens.toLocaleString(),
+        })}
+        status={exceeded ? { key: 'tokenLimitExceededTag', error: true } : null}
+        action={
+          <div className={styles.fetchRow}>
+            {totalTokens > 0 ? (
+              <Button
+                variant="outlined"
+                size="m"
+                onClick={() => {
+                  resetDailyTokenUsage()
+                  showToast({ key: 'tokenLimitResetToast' })
+                }}
+              >
+                {t('tokenLimitResetButton')}
+              </Button>
+            ) : null}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={tokenLimitEnabled}
+              aria-label={t('tokenLimitToggleLabel')}
+              className={styles.switch}
+              onClick={() => setTokenLimitEnabled(!tokenLimitEnabled)}
+            >
+              <span className={styles.switchThumb} />
+            </button>
+          </div>
+        }
+      />
+      {tokenLimitEnabled ? (
+        <div className={styles.cell}>
+          <div className={styles.label}>{t('tokenLimitValueLabel')}</div>
+          <div className={styles.description}>{t('tokenLimitValueDesc')}</div>
+          <div className={styles.fetchRow}>
+            <input
+              type="number"
+              min={1000}
+              step={10000}
+              className={clsx(styles.textInput, styles.fetchInput)}
+              value={limitDraft}
+              onChange={(event) => {
+                const raw = event.target.value
+                setLimitDraft(raw)
+                const n = Number(raw)
+                if (Number.isFinite(n) && n >= 1000) {
+                  setDailyTokenLimit(n)
+                }
+              }}
+              onBlur={commitLimit}
+            />
+            <div className={styles.presetRow}>
+              {TOKEN_PRESETS.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  className={styles.presetPill}
+                  onClick={() => {
+                    setDailyTokenLimit(preset.value)
+                    setLimitDraft(String(preset.value))
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+const UpdateSetting = () => {
+  const t = useTranslate()
+  const autoCheckUpdate = useSettings((state) => state.autoCheckUpdate)
+  const checking = useUpdater((state) => state.checking)
+  const latest = useUpdater((state) => state.latest)
+  const versionInfo = getCurrentAppVersion()
+
+  return (
+    <>
+      <SettingCell
+        label={t('updateSectionLabel')}
+        description={t('updateCurrentVersion', {
+          version: versionInfo.versionName,
+          platform: versionInfo.isAndroid ? 'Android' : 'Web',
+        })}
+        status={null}
+        action={
+          <div className={styles.fetchRow}>
+            {latest ? (
+              <Button variant="outlined" size="m" onClick={openUpdateModal}>
+                {t('updateViewAnnouncement')}
+              </Button>
+            ) : null}
+            <Button
+              variant="outlined"
+              size="m"
+              className={styles.cellButton}
+              disabled={checking}
+              onClick={() => void checkForUpdates({ manual: true })}
+            >
+              {t(checking ? 'updateCheckingButton' : 'updateCheckButton')}
+            </Button>
+          </div>
+        }
+      />
+      <SettingCell
+        label={t('updateAutoCheckLabel')}
+        description={t('updateAutoCheckDesc')}
+        status={null}
+        action={
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoCheckUpdate}
+            aria-label={t('updateAutoCheckLabel')}
+            className={styles.switch}
+            onClick={() => setAutoCheckUpdate(!autoCheckUpdate)}
+          >
+            <span className={styles.switchThumb} />
+          </button>
+        }
+      />
+    </>
   )
 }
 
@@ -436,7 +643,7 @@ const SettingCell = ({
   )
 }
 
-/** 选文件后先提示覆盖；确认后才检查文件并执行导入，任何错误都提示导入失败。 */
+/** 选文件后先提示覆盖；确认后才检查文件并执行导入，实时展示进度并反馈具体错误。 */
 const useHistoryImport = () => {
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -450,12 +657,34 @@ const useHistoryImport = () => {
     importing.current = true
     setFile(null)
     setBusy(true)
-    setStatus(null)
+    setStatus({ key: 'historyImporting', params: { count: 0 } })
     try {
-      const count = await importHistory(file)
-      setStatus({ key: count === 1 ? 'historyImportedOne' : 'historyImported', params: { count } })
-    } catch {
-      setStatus({ key: 'historyImportFailed', error: true })
+      const count = await importHistory(file, (parsedCount) => {
+        if (parsedCount <= 10 || parsedCount % 10 === 0) {
+          setStatus({ key: 'historyImporting', params: { count: parsedCount } })
+        }
+      })
+      const successStatus: Status = {
+        key: count === 1 ? 'historyImportedOne' : 'historyImported',
+        params: { count },
+      }
+      setStatus(successStatus)
+      showToast(successStatus)
+    } catch (error) {
+      const failed = errorStatus('historyImportReasonFailed', error)
+      setStatus(failed)
+      showToast({
+        type: 'error',
+        key: 'historyImportReasonFailed',
+        params: {
+          message:
+            error instanceof BackupError
+              ? translate(error.key)
+              : error instanceof Error
+                ? error.message
+                : String(error),
+        },
+      })
     } finally {
       importing.current = false
       setBusy(false)
@@ -491,7 +720,7 @@ const ImportHistory = ({
             onClick={() => inputRef.current?.click()}
           >
             <IconUploadOutline14 />
-            {t('upload')}
+            {t(historyImport.busy ? 'historyImportingButton' : 'upload')}
           </Button>
           <input
             ref={inputRef}

@@ -267,7 +267,10 @@ const buildTree = (file: SessionFile): Pick<Session, 'messages' | 'rootMessageId
   if (messages.length === 0) {
     return { messages, rootMessageId: null }
   }
-  let current = byId.get(file.current_message_id) ?? fail('backupInvalidBranches')
+  let current =
+    byId.get(file.current_message_id) ??
+    messages[messages.length - 1] ??
+    fail('backupInvalidBranches')
   // 当前消息就是用户停留的位置，后面即使还有消息也不继续展开。
   current.selectedChildId = undefined
   while (current.parentId) {

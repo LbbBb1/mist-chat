@@ -20,6 +20,7 @@ export const SessionItem = memo(function SessionItem({
 }) {
   const t = useTranslate()
   const [editing, setEditing] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const displayTitle = session.title || t('untitledChat')
 
   if (editing) {
@@ -49,7 +50,7 @@ export const SessionItem = memo(function SessionItem({
 
   return (
     <div
-      className={clsx(styles.item, active && styles.active)}
+      className={clsx(styles.item, active && styles.active, menuOpen && styles.menuOpen)}
       onClick={() => {
         selectSession(session.id)
         closeMobileSider()
@@ -58,12 +59,16 @@ export const SessionItem = memo(function SessionItem({
       <div className={styles.title}>{displayTitle}</div>
       <div className={styles.action} onClick={(event) => event.stopPropagation()}>
         <Menu
+          onOpenChange={setMenuOpen}
           options={[
             {
               key: 'rename',
               label: t('sessionItemMenuRenameOption'),
               icon: <IconEditOutline16 />,
-              onSelect: () => setEditing(true),
+              onSelect: () => {
+                setMenuOpen(false)
+                setEditing(true)
+              },
             },
             {
               key: 'delete',
@@ -74,8 +79,13 @@ export const SessionItem = memo(function SessionItem({
             },
           ]}
         >
-          {({ toggle }) => (
-            <IconButton icon={<IconEllipsisOutline16 />} aria-label={t('more')} onClick={toggle} />
+          {({ open, toggle }) => (
+            <IconButton
+              icon={<IconEllipsisOutline16 />}
+              aria-label={t('more')}
+              aria-expanded={open}
+              onClick={toggle}
+            />
           )}
         </Menu>
       </div>

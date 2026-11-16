@@ -77,7 +77,21 @@ export const ApiKeyField = ({ editor }: { editor: ApiKeyEditor }) => {
             ) : null}
           </div>
         )}
-        {showInput && form.error ? <div className={styles.error}>{form.error}</div> : null}
+        {showInput && form.error ? (
+          <div className={styles.errorRow}>
+            <span className={styles.error}>{form.error}</span>
+            {form.value.trim() ? (
+              <button
+                type="button"
+                className={styles.linkAction}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={form.saveDirect}
+              >
+                {t('apiKeySaveDirect')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   )

@@ -17,3 +17,14 @@
   font: var(--dsw-font-s-strong-14);
   color: var(--dsw-alias-label-primary);
 }
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.speakerActive {
+  color: var(--dsw-alias-brand-text);
+}

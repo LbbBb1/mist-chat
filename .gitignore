@@ -9,3 +9,8 @@ build/
 .env.*
 !.env.example
 tmp/
+*.jks
+*.keystore
+*.apk
+.idea/
+android/local.properties

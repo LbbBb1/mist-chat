@@ -523,3 +523,227 @@ export const IconToastError16 = () => (
     />
   </svg>
 )
+
+/** 连续语音通话波形图标（类似 Gemini Live 声波样式） */
+export const IconVoiceCall16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="1.75" y="5.5" width="1.75" height="5" rx="0.875" fill="currentColor" />
+    <rect x="5.1" y="2.75" width="1.75" height="10.5" rx="0.875" fill="currentColor" />
+    <rect x="8.45" y="4.25" width="1.75" height="7.5" rx="0.875" fill="currentColor" />
+    <rect x="11.8" y="6" width="1.75" height="4" rx="0.875" fill="currentColor" />
+    <path
+      d="M13.6 1.2L14.05 2.35L15.2 2.8L14.05 3.25L13.6 4.4L13.15 3.25L12 2.8L13.15 2.35L13.6 1.2Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
+export const IconMicOff16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 1.5C6.34 1.5 5 2.84 5 4.5V7.5C5 7.98 5.11 8.43 5.31 8.83L9.83 4.31C9.43 2.69 8.79 1.5 8 1.5Z"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <path
+      d="M11 6.5V7.5C11 9.16 9.66 10.5 8 10.5C7.68 10.5 7.38 10.45 7.09 10.36"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <path
+      d="M3.25 7.5C3.25 10.12 5.38 12.25 8 12.25C9.04 12.25 10 11.91 10.78 11.34M12.75 7.5C12.75 8.15 12.62 8.77 12.38 9.34M8 12.25V14.5M5.75 14.5H10.25M2.25 2.25L13.75 13.75"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconPhoneOff16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M2.2 9.9C4.1 8.1 6.4 7.4 8 7.4C9.6 7.4 11.9 8.1 13.8 9.9C14.2 10.3 14.2 10.9 13.9 11.3L12.7 12.5C12.3 12.9 11.7 12.9 11.3 12.6L9.9 11.4C9.6 11.2 9.5 10.8 9.6 10.4L9.8 9.6C8.6 9.3 7.4 9.3 6.2 9.6L6.4 10.4C6.5 10.8 6.4 11.2 6.1 11.4L4.7 12.6C4.3 12.9 3.7 12.9 3.3 12.5L2.1 11.3C1.8 10.9 1.8 10.3 2.2 9.9Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
+export const IconCameraOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect
+      x="1.75"
+      y="3.75"
+      width="9"
+      height="8.5"
+      rx="1.8"
+      stroke="currentColor"
+      strokeWidth="1.4"
+    />
+    <path
+      d="M10.75 6.8L13.75 4.9C14.1 4.68 14.5 4.93 14.5 5.34V10.66C14.5 11.07 14.1 11.32 13.75 11.1L10.75 9.2"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconCameraOff16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M4.2 3.75H8.95C9.94 3.75 10.75 4.56 10.75 5.55V7.9M10.75 10.45C10.75 11.44 9.94 12.25 8.95 12.25H3.55C2.56 12.25 1.75 11.44 1.75 10.45V5.55C1.75 4.99 2.01 4.49 2.42 4.16"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <path
+      d="M10.75 6.8L13.75 4.9C14.1 4.68 14.5 4.93 14.5 5.34V10.66C14.5 11.07 14.1 11.32 13.75 11.1L11.55 9.7"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M2.25 2.25L13.75 13.75"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
+export const IconFlipCamera16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M3.2 7.5A4.8 4.8 0 0 1 11.8 4.6M12.8 8.5A4.8 4.8 0 0 1 4.2 11.4"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <path
+      d="M12.1 2.4V4.9H9.6M3.9 13.6V11.1H6.4"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconImageGen14 = () => (
+  <svg width={14} height={14} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect
+      x="1.4"
+      y="2.1"
+      width="11.2"
+      height="9.8"
+      rx="2"
+      stroke="currentColor"
+      strokeWidth="1.25"
+    />
+    <circle cx="4.7" cy="5.3" r="1.1" fill="currentColor" />
+    <path
+      d="M2.6 10.4L5.6 7.4L7.7 9.4L9.5 7.7L11.6 10.4"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconPlusOutline18 = () => (
+  <svg width={18} height={18} viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M9 3.75V14.25M3.75 9H14.25"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
+export const IconCameraOutline22 = () => (
+  <svg width={22} height={22} viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M7.3 4.8L8.4 3.4C8.72 3 9.2 2.75 9.72 2.75H12.28C12.8 2.75 13.28 3 13.6 3.4L14.7 4.8H17.2C18.61 4.8 19.75 5.94 19.75 7.35V16.2C19.75 17.61 18.61 18.75 17.2 18.75H4.8C3.39 18.75 2.25 17.61 2.25 16.2V7.35C2.25 5.94 3.39 4.8 4.8 4.8H7.3Z"
+      stroke="currentColor"
+      strokeWidth="1.55"
+      strokeLinejoin="round"
+    />
+    <circle cx="11" cy="11.6" r="3.2" stroke="currentColor" strokeWidth="1.55" />
+  </svg>
+)
+
+export const IconGalleryOutline22 = () => (
+  <svg width={22} height={22} viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect
+      x="2.75"
+      y="3.5"
+      width="16.5"
+      height="15"
+      rx="3"
+      stroke="currentColor"
+      strokeWidth="1.55"
+    />
+    <circle cx="7.4" cy="8.2" r="1.4" fill="currentColor" />
+    <path
+      d="M4.2 15.6L8.7 11.2L11.7 14L14.4 11.5L17.8 15.6"
+      stroke="currentColor"
+      strokeWidth="1.55"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconAttachmentOutline22 = () => (
+  <svg width={22} height={22} viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M15.8 9.2L9.75 15.25C8.23 16.77 5.77 16.77 4.25 15.25C2.73 13.73 2.73 11.27 4.25 9.75L11.15 2.85C12.16 1.84 13.8 1.84 14.81 2.85C15.82 3.86 15.82 5.5 14.81 6.51L7.95 13.37C7.44 13.88 6.62 13.88 6.11 13.37C5.6 12.86 5.6 12.04 6.11 11.53L12.15 5.5"
+      stroke="currentColor"
+      strokeWidth="1.55"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconVolumeOnOutline20 = () => (
+  <svg width={20} height={20} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M3.2 7.8H5.9L10.3 4.2C10.8 3.79 11.55 4.15 11.55 4.79V15.21C11.55 15.85 10.8 16.21 10.3 15.8L5.9 12.2H3.2C2.65 12.2 2.2 11.75 2.2 11.2V8.8C2.2 8.25 2.65 7.8 3.2 7.8Z"
+      stroke="currentColor"
+      strokeWidth="1.55"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M14.3 7.15C15.3 8.15 15.8 9.1 15.8 10C15.8 10.9 15.3 11.85 14.3 12.85"
+      stroke="currentColor"
+      strokeWidth="1.55"
+      strokeLinecap="round"
+    />
+    <path
+      d="M16.5 5.1C18 6.6 18.75 8.23 18.75 10C18.75 11.77 18 13.4 16.5 14.9"
+      stroke="currentColor"
+      strokeWidth="1.55"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
+export const IconVolumeOffOutline20 = () => (
+  <svg width={20} height={20} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M3.2 7.8H5.9L10.3 4.2C10.8 3.79 11.55 4.15 11.55 4.79V15.21C11.55 15.85 10.8 16.21 10.3 15.8L5.9 12.2H3.2C2.65 12.2 2.2 11.75 2.2 11.2V8.8C2.2 8.25 2.65 7.8 3.2 7.8Z"
+      stroke="currentColor"
+      strokeWidth="1.55"
+      strokeLinejoin="round"
+    />
+    <path d="M2.6 2.8L17.4 17.6" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" />
+  </svg>
+)

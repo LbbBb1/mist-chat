@@ -214,7 +214,7 @@ const message: Read<ChatMessage> = (value) => {
     )(item.status),
     thinking_enabled: boolean(item.thinking_enabled),
     search_enabled: boolean(item.search_enabled),
-    accumulated_token_usage: count(item.accumulated_token_usage),
+    accumulated_token_usage: nullable(count)(item.accumulated_token_usage ?? null) ?? 0,
     inserted_at: time(item.inserted_at),
     fragments: list(fragment)(item.fragments).filter((item): item is Fragment => item !== null),
   }
@@ -255,7 +255,7 @@ export const readSessionFile: Read<SessionFile> = (value) => {
     id: sessionId(item.id),
     title: nullable(string)(item.title),
     pinned: false,
-    current_message_id: count(item.current_message_id),
+    current_message_id: nullable(count)(item.current_message_id ?? null) ?? 0,
     inserted_at: time(item.inserted_at),
     updated_at: time(item.updated_at),
     messages: list(message)(item.messages),

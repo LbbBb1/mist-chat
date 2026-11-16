@@ -62,8 +62,20 @@ export type TextPart = {
   isTemplate?: boolean
 }
 
+/** 生图块：生成的图片原件存在 IndexedDB files 表（key 为 fileId） */
+export type ImagePart = {
+  type: 'image'
+  fileId: string
+  mimeType: string
+  prompt?: string
+  size?: string
+  sourceFileIds?: string[]
+  status?: 'pending_confirm' | 'generating' | 'done' | 'cancelled' | 'error'
+  error?: string
+}
+
 /** 服务端工具调用与结果块按协议原样保存；历史请求只回传 read_link 调用与结果 */
-export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock
+export type ReplyBlock = ThinkingPart | TextPart | ImagePart | ServerToolBlock
 
 /**
  * pending：已发出请求，还没收到事件；streaming：正在接收；

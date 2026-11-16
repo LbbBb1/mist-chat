@@ -58,5 +58,29 @@
     top: var(--app-viewport-top, 0px);
     bottom: auto;
     height: var(--app-viewport-height, 100dvh);
+    background-color: var(--dsw-specific-sidebar-fill);
   }
+}
+
+.mobileMain {
+  z-index: 2;
+  background-color: var(--dsw-alias-bg-base);
+  will-change: transform;
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease;
+}
+
+.mobileMainOpen {
+  transform: translate3d(min(300px, calc(100vw - 56px)), 0, 0);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: -6px 0 28px rgba(0, 0, 0, 0.12);
+}
+
+.mobileBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
 }

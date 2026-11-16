@@ -1,13 +1,33 @@
 import clsx from 'clsx'
-import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react'
+import {
+  IconAttachmentOutline22,
+  IconCameraOutline22,
+  IconGalleryOutline22,
   IconGlobeLanguageOutline14,
-  IconPaperclipOutline16,
+  IconImageGen14,
+  IconPlusOutline18,
   IconSendOutline16,
   IconStopFill16,
   IconThinkOutline14,
+  IconVoiceCall16,
 } from '../base/icons.js'
-import { setSearch, setThinking, useSettings } from '../../services/settings.js'
+import {
+  matchesRefusalKeyword,
+  setImageGen,
+  setImageGenChannel,
+  setSearch,
+  setThinking,
+  useSettings,
+} from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
 import {
@@ -21,13 +41,14 @@ import {
   useDrafts,
 } from '../../services/chat/drafts.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
-import { IconButton } from '../base/IconButton.js'
+import { startVoiceCall } from '../../services/speech/voiceCall.js'
 import { Tooltip } from '../base/Tooltip.js'
-import { ensureApiKey } from '../settings/settingsDialogState.js'
+import { ensureApiKey, openSettings } from '../settings/settingsDialogState.js'
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
 import { ACCEPT, useUploads } from '../../services/attachments.js'
 import { DraftAttachments } from './DraftAttachments.js'
+import { ImageSizePicker } from '../messages/ImageSizePicker.js'
 import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
@@ -53,9 +74,31 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
+  const imageGen = useSettings((state) => state.imageGen)
+  const imageGenChannel = useSettings((state) => state.imageGenChannel)
+  const imageGenReady = imageGenChannel.enabled && Boolean(imageGenChannel.model.trim())
+  const hasImageAttachment = attachments.some((item) => item.isImage)
+  const [plusOpen, setPlusOpen] = useState(false)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
+
+  const openPicker = (ref: RefObject<HTMLInputElement>) => {
+    const {
+      imageGen: isImageGen,
+      imageGenChannel: imgChannel,
+      customHeaders,
+    } = useSettings.getState()
+    const hasCustomAuth =
+      isImageGen &&
+      imageGenReady &&
+      Boolean(imgChannel.apiKey.trim() || imgChannel.customHeaders.trim() || customHeaders.trim())
+    if (hasCustomAuth || ensureApiKey()) {
+      ref.current?.click()
+    }
+  }
 
   useLayoutEffect(() => {
     const toggles = togglesRef.current
@@ -75,7 +118,19 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   }, [t])
 
   const acceptFiles = (files: File[]) => {
-    if (files.length === 0 || useChatStore.getState().importingHistory || !ensureApiKey()) {
+    if (files.length === 0 || useChatStore.getState().importingHistory) {
+      return
+    }
+    const {
+      imageGen: isImageGen,
+      imageGenChannel: imgChannel,
+      customHeaders,
+    } = useSettings.getState()
+    const hasCustomAuth =
+      isImageGen &&
+      imageGenReady &&
+      Boolean(imgChannel.apiKey.trim() || imgChannel.customHeaders.trim() || customHeaders.trim())
+    if (!hasCustomAuth && !ensureApiKey()) {
       return
     }
     const error = addDraftFiles(sessionId, files, useSettings.getState().apiKey ?? '')
@@ -130,21 +185,34 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const recording = voice.status === 'recording'
 
   // 排队、上传中或上传失败的附件都留在输入框，全部上传成功后才能发送
+  const hasDraftContent = text.trim() !== '' || attachments.length > 0
   const canSend = !importingHistory && !streaming && voice.status === 'idle' && draftReady
+  const showVoiceCall = !streaming && !hasDraftContent && voice.status === 'idle'
+  const canVoiceCall = !importingHistory && voice.available
 
   const send = () => {
+    const prepared = prepareDraftMessage(getDraft(sessionId), useUploads.getState().tasks)
+    if (useChatStore.getState().importingHistory || voice.status !== 'idle' || !prepared) {
+      return
+    }
+    const {
+      imageGen: isImageGen,
+      imageGenChannel: imgChannel,
+      customHeaders,
+    } = useSettings.getState()
+    const hasImageGenAuth =
+      isImageGen &&
+      imageGenReady &&
+      Boolean(imgChannel.apiKey.trim() || imgChannel.customHeaders.trim() || customHeaders.trim())
+    // 命中本地拒答关键词或已独立配置生图密钥时，无需强制校验主 API Key；文本与上传完成态由提交动作读取最新快照。
     if (
-      useChatStore.getState().importingHistory ||
-      voice.status !== 'idle' ||
-      !prepareDraftMessage(getDraft(sessionId), useUploads.getState().tasks)
+      (!matchesRefusalKeyword(prepared.text) && !hasImageGenAuth && !ensureApiKey()) ||
+      !sendMessage(sessionId)
     ) {
       return
     }
-    // 文本与上传完成态由提交动作读取最新快照，不使用上一次渲染的草稿。
-    if (!ensureApiKey() || !sendMessage(sessionId)) {
-      return
-    }
     stopReadAloud()
+    setPlusOpen(false)
     if (isMobile) {
       textareaRef.current?.blur()
     } else {
@@ -153,136 +221,257 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   }
 
   return (
-    <div
-      className={clsx(styles.wrapper, sessionId === null ? styles.home : styles.session)}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          textareaRef.current?.focus({ preventScroll: true })
-        }
-      }}
-    >
-      <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
-      <div className={styles.textareaWrapper}>
-        <textarea
-          ref={textareaRef}
-          className={clsx(styles.textarea, recording && isMobile && styles.textareaHidden)}
-          placeholder={t('chatInputPlaceholderChat')}
-          rows={2}
-          // 移动端不自动聚焦，避免一打开就弹出键盘
-          autoFocus={!isMobile}
-          disabled={importingHistory}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onMouseDown={(event) => {
-            // 首次点击时手动聚焦，避免 Safari 把整个页面滚到输入框位置。
-            if (isMobile && event.button === 0 && document.activeElement !== event.currentTarget) {
-              event.preventDefault()
-              event.currentTarget.focus({ preventScroll: true })
-            }
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault()
-              send()
-            }
-          }}
-          onPaste={(event) => {
-            const files = Array.from(event.clipboardData.files)
-            if (files.length > 0) {
-              event.preventDefault()
-              acceptFiles(files)
-            }
-          }}
-        />
-        {recording && isMobile ? <Spectrum getAnalyser={voice.getAnalyser} /> : null}
-        <div className={styles.mirror} aria-hidden>
-          {`${text}\n`}
-        </div>
-      </div>
-      <div className={styles.functionRow}>
-        {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
-        <div ref={togglesRef} className={styles.toggles}>
-          <Tooltip content={t('deactivatedThinkTooltip')}>
-            <button
-              type="button"
-              className={clsx(styles.toggle, thinking && styles.selected)}
-              aria-label={t('thinkingSwitch')}
-              aria-pressed={thinking}
-              onClick={() => setThinking(!thinking)}
-            >
-              <IconThinkOutline14 />
-              <span className={styles.toggleLabel}>{t('thinkingSwitch')}</span>
-            </button>
-          </Tooltip>
-          <Tooltip content={t('deactivatedSearchTooltip')}>
-            <button
-              type="button"
-              className={clsx(styles.toggle, search && styles.selected)}
-              aria-label={t('search')}
-              aria-pressed={search}
-              onClick={() => setSearch(!search)}
-            >
-              <IconGlobeLanguageOutline14 />
-              <span className={styles.toggleLabel}>{t('search')}</span>
-            </button>
-          </Tooltip>
-        </div>
-        <div className={styles.right}>
-          <VoiceButton
-            status={voice.status}
-            disabled={!voice.available}
-            seconds={voice.seconds}
-            onClick={() => {
+    <div className={styles.inputHost}>
+      <div
+        className={clsx(styles.wrapper, sessionId === null ? styles.home : styles.session)}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            textareaRef.current?.focus({ preventScroll: true })
+          }
+        }}
+      >
+        <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
+        <div className={styles.textareaWrapper}>
+          <textarea
+            ref={textareaRef}
+            className={clsx(styles.textarea, recording && isMobile && styles.textareaHidden)}
+            placeholder={t('chatInputPlaceholderChat')}
+            rows={2}
+            // 移动端不自动聚焦，避免一打开就弹出键盘
+            autoFocus={!isMobile}
+            disabled={importingHistory}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onMouseDown={(event) => {
+              // 首次点击时手动聚焦，避免 Safari 把整个页面滚到输入框位置。
               if (
-                voice.status !== 'idle' ||
-                (!useChatStore.getState().importingHistory && ensureApiKey())
+                isMobile &&
+                event.button === 0 &&
+                document.activeElement !== event.currentTarget
               ) {
-                void voice.toggle()
+                event.preventDefault()
+                event.currentTarget.focus({ preventScroll: true })
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                send()
+              }
+            }}
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.files)
+              if (files.length > 0) {
+                event.preventDefault()
+                acceptFiles(files)
               }
             }}
           />
-          <IconButton
-            size="m"
-            tone="primary"
-            icon={<IconPaperclipOutline16 />}
-            tooltip={t('uploadFile')}
-            disabled={importingHistory}
-            onClick={() => ensureApiKey() && fileInputRef.current?.click()}
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            accept={ACCEPT}
-            onChange={(event) => {
-              acceptFiles(Array.from(event.target.files ?? []))
-              event.target.value = ''
-            }}
-          />
-          {streaming && sessionId ? (
-            <button
-              type="button"
-              className={styles.sendButton}
-              aria-label={t('chatInputStopButtonTooltip')}
+          {recording && isMobile ? <Spectrum getAnalyser={voice.getAnalyser} /> : null}
+          <div className={styles.mirror} aria-hidden>
+            {`${text}\n`}
+          </div>
+        </div>
+        <div className={styles.functionRow}>
+          {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
+          <div ref={togglesRef} className={styles.toggles}>
+            <Tooltip content={t('deactivatedThinkTooltip')}>
+              <button
+                type="button"
+                className={clsx(styles.toggle, thinking && styles.selected)}
+                aria-label={t('thinkingSwitch')}
+                aria-pressed={thinking}
+                onClick={() => setThinking(!thinking)}
+              >
+                <IconThinkOutline14 />
+                <span className={styles.toggleLabel}>{t('thinkingSwitch')}</span>
+              </button>
+            </Tooltip>
+            <Tooltip content={t('deactivatedSearchTooltip')}>
+              <button
+                type="button"
+                className={clsx(styles.toggle, search && styles.selected)}
+                aria-label={t('search')}
+                aria-pressed={search}
+                onClick={() => setSearch(!search)}
+              >
+                <IconGlobeLanguageOutline14 />
+                <span className={styles.toggleLabel}>{t('search')}</span>
+              </button>
+            </Tooltip>
+            <Tooltip content={t('imageGenTooltip')}>
+              <button
+                type="button"
+                className={clsx(styles.toggle, imageGen && imageGenReady && styles.selected)}
+                aria-label={t('imageGenSwitch')}
+                aria-pressed={imageGen && imageGenReady}
+                onClick={() => {
+                  if (!imageGenReady) {
+                    showToast({ key: 'imageGenNotConfigured' })
+                    openSettings('model')
+                    return
+                  }
+                  setImageGen(!imageGen)
+                }}
+              >
+                <IconImageGen14 />
+                <span className={styles.toggleLabel}>{t('imageGenSwitch')}</span>
+              </button>
+            </Tooltip>
+            {imageGen && imageGenReady ? (
+              <ImageSizePicker
+                compact
+                value={imageGenChannel.size}
+                hasReference={hasImageAttachment}
+                onChange={(size) => setImageGenChannel({ ...imageGenChannel, size })}
+              />
+            ) : null}
+          </div>
+          <div className={styles.right}>
+            <VoiceButton
+              status={voice.status}
+              disabled={!voice.available}
+              seconds={voice.seconds}
               onClick={() => {
-                stopReadAloud()
-                stopReply(sessionId)
+                if (
+                  voice.status !== 'idle' ||
+                  (!useChatStore.getState().importingHistory && ensureApiKey())
+                ) {
+                  void voice.toggle()
+                }
               }}
-            >
-              <IconStopFill16 />
-            </button>
-          ) : (
+            />
+            <Tooltip content={t('chatInputMoreActions')}>
+              <button
+                type="button"
+                className={clsx(styles.plusButton, plusOpen && styles.plusOpen)}
+                aria-label={t('chatInputMoreActions')}
+                aria-expanded={plusOpen}
+                disabled={importingHistory}
+                onClick={() => setPlusOpen((value) => !value)}
+              >
+                <span className={styles.plusIcon}>
+                  <IconPlusOutline18 />
+                </span>
+              </button>
+            </Tooltip>
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              hidden
+              onChange={(event) => {
+                acceptFiles(Array.from(event.target.files ?? []))
+                event.target.value = ''
+                setPlusOpen(false)
+              }}
+            />
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(event) => {
+                acceptFiles(Array.from(event.target.files ?? []))
+                event.target.value = ''
+                setPlusOpen(false)
+              }}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              accept={ACCEPT}
+              onChange={(event) => {
+                acceptFiles(Array.from(event.target.files ?? []))
+                event.target.value = ''
+                setPlusOpen(false)
+              }}
+            />
+            {streaming && sessionId ? (
+              <button
+                type="button"
+                className={styles.sendButton}
+                aria-label={t('chatInputStopButtonTooltip')}
+                onClick={() => {
+                  stopReadAloud()
+                  stopReply(sessionId)
+                }}
+              >
+                <IconStopFill16 />
+              </button>
+            ) : showVoiceCall ? (
+              <Tooltip
+                content={voice.available ? t('voiceCallStart') : t('voiceInputRequiresHttps')}
+              >
+                <button
+                  type="button"
+                  className={clsx(styles.sendButton, !canVoiceCall && styles.disabled)}
+                  aria-label={t('voiceCallStart')}
+                  aria-disabled={!canVoiceCall}
+                  onClick={() => {
+                    if (canVoiceCall && ensureApiKey()) {
+                      startVoiceCall(sessionId)
+                    }
+                  }}
+                >
+                  <IconVoiceCall16 />
+                </button>
+              </Tooltip>
+            ) : (
+              <button
+                type="button"
+                className={clsx(styles.sendButton, !canSend && styles.disabled)}
+                aria-label={t('send')}
+                aria-disabled={!canSend}
+                onClick={send}
+              >
+                <IconSendOutline16 />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      <div
+        className={clsx(styles.moreTray, plusOpen && styles.moreTrayOpen)}
+        aria-hidden={!plusOpen}
+      >
+        <div className={styles.moreTrayInner}>
+          <div className={styles.moreGrid}>
             <button
               type="button"
-              className={clsx(styles.sendButton, !canSend && styles.disabled)}
-              aria-label={t('send')}
-              aria-disabled={!canSend}
-              onClick={send}
+              className={styles.moreCard}
+              tabIndex={plusOpen ? 0 : -1}
+              disabled={importingHistory}
+              onClick={() => openPicker(cameraInputRef)}
             >
-              <IconSendOutline16 />
+              <IconCameraOutline22 />
+              <span>{t('chatInputTakePhoto')}</span>
             </button>
-          )}
+            <button
+              type="button"
+              className={styles.moreCard}
+              tabIndex={plusOpen ? 0 : -1}
+              disabled={importingHistory}
+              onClick={() => openPicker(galleryInputRef)}
+            >
+              <IconGalleryOutline22 />
+              <span>{t('chatInputPhotoLibrary')}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.moreCard}
+              tabIndex={plusOpen ? 0 : -1}
+              disabled={importingHistory}
+              onClick={() => openPicker(fileInputRef)}
+            >
+              <IconAttachmentOutline22 />
+              <span>{t('chatInputPickFiles')}</span>
+            </button>
+          </div>
         </div>
       </div>
       {dragging ? <DragMask /> : null}

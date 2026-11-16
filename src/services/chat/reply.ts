@@ -17,19 +17,20 @@ import type {
 
 /**
  * 文件按 Files API 的 file_id（附件的 serverId）引用：图片用 image 块，其余用 document 块。
- * 发送前 streamReply 会先补齐 serverId；仍为 null 的是本地没有原件的附件，不进入请求。
+ * 当使用本地内联模式（如 OpenAI 兼容或自定义识别）时，可用本地 id 占位供上层替换。
  */
-const toFileBlocks = (files: FileAttachment[]): FileBlockParam[] =>
-  files.flatMap(({ serverId, isImage }) =>
-    serverId
+const toFileBlocks = (files: FileAttachment[], useLocalId = false): FileBlockParam[] =>
+  files.flatMap(({ id, serverId, isImage }) => {
+    const refId = useLocalId ? (serverId ?? id) : serverId
+    return refId
       ? [
           {
             type: isImage ? 'image' : 'document',
-            source: { type: 'file', file_id: serverId },
+            source: { type: 'file', file_id: refId },
           },
         ]
       : []
-  )
+  })
 
 const toReplyBlock = (block: OutputBlockStart, now: number): ReplyBlock | null => {
   switch (block.type) {
@@ -138,19 +139,25 @@ export const applyEvent = (
 
 /**
  * 回复结束：未结束的思考块以当前时间收尾。
- * 安全拒绝（stop_reason: refusal）时已下发的思考与正文不能撤回，按协议要求由客户端丢弃，只保留工具块。
+ * 安全拒绝（stop_reason: refusal）时默认按协议丢弃思考与正文（仅保留工具块）；
+ * 若 keepRefusedContent 为 true，则保留已下发内容。
  */
 export const settleReply = (
   reply: AssistantMessage,
   status: Extract<ReplyStatus, 'done' | 'stopped' | 'error'>,
   now: number,
-  error?: AssistantMessage['error']
+  error?: AssistantMessage['error'],
+  keepRefusedContent = false
 ): AssistantMessage => ({
   ...reply,
   status,
   error,
   blocks: reply.blocks.flatMap((block): ReplyBlock[] => {
-    if (reply.stopReason === 'refusal' && (block.type === 'thinking' || block.type === 'text')) {
+    if (
+      !keepRefusedContent &&
+      reply.stopReason === 'refusal' &&
+      (block.type === 'thinking' || block.type === 'text')
+    ) {
       return []
     }
     return block.type === 'thinking' && block.startedAt !== undefined && block.endedAt === undefined
@@ -165,45 +172,46 @@ export const getReplyText = (reply: AssistantMessage) =>
 
 /**
  * 只有正常达到输出上限或被停止的回复可续写，报错回复不能续写。
- * 末条限制由调用方判断，拒绝和客户端工具调用不能续写。
- * 本轮含服务端工具调用或结果（含 READ_LINK 和孤立结果块）的回复不能续写。
- * 服务端模板提示不能作为续写前缀。
+ * 默认拒绝与服务端模板提示不能续写；当 allowRefused 为 true 时允许被拒回复继续生成。
  */
-export const canContinueReply = (reply: AssistantMessage): boolean => {
+export const canContinueReply = (reply: AssistantMessage, allowRefused = false): boolean => {
   if (
     !reply.prefix ||
-    reply.stopReason === 'refusal' ||
+    (!allowRefused && reply.stopReason === 'refusal') ||
     reply.stopReason === 'tool_use' ||
     reply.blocks.some(
       (block) =>
         block.type === 'server_tool_use' ||
         block.type === 'web_search_tool_result' ||
         block.type === 'web_fetch_tool_result' ||
-        (block.type === 'text' && block.isTemplate)
+        (!allowRefused && block.type === 'text' && block.isTemplate)
     )
   ) {
     return false
   }
   return (
     reply.status === 'stopped' ||
-    (reply.status === 'done' && reply.stopReason === 'max_tokens')
+    (reply.status === 'done' &&
+      (reply.stopReason === 'max_tokens' || (allowRefused && reply.stopReason === 'refusal')))
   )
 }
 
 /**
- * 已结束或停止且有回答文本的回复才放进上下文；被安全拒绝的轮次不回传。
- * 服务端模板提示不进入上下文。
+ * 已结束或停止且有回答文本的回复才放进上下文；默认被安全拒绝或模板提示不回传。
+ * 当 allowRefused 为 true 时，允许含文本内容的被拒轮次进入上下文。
  */
-const isUsableReply = (message: Message): message is AssistantMessage =>
+const isUsableReply = (message: Message, allowRefused = false): message is AssistantMessage =>
   message.role === 'assistant' &&
   (message.status === 'done' || message.status === 'stopped') &&
-  message.stopReason !== 'refusal' &&
-  !message.blocks.some((block) => block.type === 'text' && block.isTemplate) &&
-  getReplyText(message) !== ''
+  (allowRefused ||
+    (message.stopReason !== 'refusal' &&
+      !message.blocks.some((block) => block.type === 'text' && block.isTemplate))) &&
+  (getReplyText(message) !== '' ||
+    message.blocks.some((block) => block.type === 'image' && block.fileId !== ''))
 
 /** 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用 */
-const toUserParam = ({ content, files }: UserMessage): MessageParam => {
-  const blocks = toFileBlocks(files)
+const toUserParam = ({ content, files }: UserMessage, useLocalId = false): MessageParam => {
+  const blocks = toFileBlocks(files, useLocalId)
   return blocks.length === 0
     ? { role: 'user', content }
     : {
@@ -242,6 +250,19 @@ const toAssistantParam = (
   for (const block of blocks) {
     // 空思考不改变续写位置，也不应把两段正文隔开，导致后端额外插入空行。
     if (prefix && block.type === 'thinking' && !block.thinking.trim()) {
+      continue
+    }
+    if (block.type === 'image') {
+      if (!block.fileId) {
+        continue
+      }
+      const note = `[已生成图片${block.prompt ? `：${block.prompt}` : ''}]`
+      if (text) {
+        text.text += `\n${note}`
+      } else {
+        text = { type: 'text', text: note }
+        content.push(text)
+      }
       continue
     }
     if (block.type === 'text') {
@@ -284,11 +305,14 @@ const toAssistantParam = (
 }
 
 /** 历史中会进入请求上下文的轮次：提问后紧跟可用回答的才保留 */
-export const getContextRounds = (history: Message[]): [UserMessage, AssistantMessage][] => {
+export const getContextRounds = (
+  history: Message[],
+  allowRefused = false
+): [UserMessage, AssistantMessage][] => {
   const rounds: [UserMessage, AssistantMessage][] = []
   for (let i = 0; i + 1 < history.length; i++) {
     const [user, reply] = [history[i], history[i + 1]]
-    if (user.role === 'user' && isUsableReply(reply)) {
+    if (user.role === 'user' && isUsableReply(reply, allowRefused)) {
       rounds.push([user, reply])
       i++
     }
@@ -305,7 +329,9 @@ export const toRequestMessages = (
   question: UserMessage,
   prefix?: AssistantMessage,
   thinking = prefix?.thinking ?? false,
-  latestReminder?: string
+  latestReminder?: string,
+  allowRefused = false,
+  useLocalFileId = false
 ): MessageParam[] => {
   const messages: MessageParam[] = []
   let previousReminder: string | undefined
@@ -316,16 +342,16 @@ export const toRequestMessages = (
       previousReminder = reminder
     }
   }
-  for (const [user, reply] of getContextRounds(history)) {
-    // 历史提问没有文字、附件也都没有 serverId 时，提问为空，连同回答一起省略。
-    if (!user.content && toFileBlocks(user.files).length === 0) {
+  for (const [user, reply] of getContextRounds(history, allowRefused)) {
+    // 历史提问没有文字、附件也都没有引用 id 时，提问为空，连同回答一起省略。
+    if (!user.content && toFileBlocks(user.files, useLocalFileId).length === 0) {
       continue
     }
     appendReminder(reply.latestReminder)
-    messages.push(toUserParam(user), toAssistantParam(reply))
+    messages.push(toUserParam(user, useLocalFileId), toAssistantParam(reply))
   }
   appendReminder(latestReminder)
-  messages.push(toUserParam(question))
+  messages.push(toUserParam(question, useLocalFileId))
   if (prefix?.prefix) {
     const assistant = toAssistantParam(prefix, true, thinking)
     // 没有非空白正文或有效思考时直接重发原问题，避免服务端拒绝空 Prefill。

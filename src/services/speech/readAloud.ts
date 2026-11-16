@@ -53,6 +53,104 @@ const toFloat32 = (bytes: Uint8Array) => {
   return samples
 }
 
+/** 消费 TTS 字节流并排程到 AudioContext；支持裸 PCM 流与封装音频（mp3/wav/opus 等） */
+export const scheduleTtsStream = async ({
+  context,
+  destination,
+  stream,
+  isPcm,
+  signal,
+  initialNextTime,
+  startDelay = START_DELAY,
+  onSource,
+  onFirstAudio,
+}: {
+  context: AudioContext
+  destination: AudioNode
+  stream: ReadableStream<Uint8Array>
+  isPcm: boolean
+  signal: AbortSignal
+  initialNextTime: number
+  startDelay?: number
+  onSource: (source: AudioBufferSourceNode) => void
+  onFirstAudio?: () => void
+}): Promise<{ nextTime: number; lastSource: AudioBufferSourceNode | null }> => {
+  const reader = stream.getReader()
+  const onAbort = () => void reader.cancel().catch(() => {})
+  signal.addEventListener('abort', onAbort, { once: true })
+  let nextTime = initialNextTime
+  let lastSource: AudioBufferSourceNode | null = null
+  let firstFired = false
+
+  const enqueueBuffer = (buffer: AudioBuffer) => {
+    const source = context.createBufferSource()
+    source.buffer = buffer
+    source.connect(destination)
+    nextTime = Math.max(
+      nextTime,
+      context.currentTime + (!lastSource && nextTime === 0 ? startDelay : 0)
+    )
+    onSource(source)
+    source.start(nextTime)
+    nextTime += buffer.duration
+    lastSource = source
+    if (!firstFired) {
+      firstFired = true
+      onFirstAudio?.()
+    }
+  }
+
+  try {
+    if (isPcm) {
+      let rest = new Uint8Array(0)
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done || signal.aborted) {
+          break
+        }
+        const bytes = new Uint8Array(rest.length + value.length)
+        bytes.set(rest)
+        bytes.set(value, rest.length)
+        const samples = toFloat32(bytes)
+        rest = bytes.slice(samples.length * 2)
+        if (samples.length === 0) {
+          continue
+        }
+        const buffer = context.createBuffer(1, samples.length, TTS_SAMPLE_RATE)
+        buffer.copyToChannel(samples, 0)
+        enqueueBuffer(buffer)
+      }
+    } else {
+      const chunks: Uint8Array[] = []
+      let total = 0
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done || signal.aborted) {
+          break
+        }
+        chunks.push(value)
+        total += value.length
+      }
+      if (!signal.aborted && total > 0) {
+        const merged = new Uint8Array(total)
+        let offset = 0
+        for (const chunk of chunks) {
+          merged.set(chunk, offset)
+          offset += chunk.length
+        }
+        const decoded = await context.decodeAudioData(merged.buffer)
+        if (!signal.aborted) {
+          enqueueBuffer(decoded)
+        }
+      }
+    }
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
+
+  return { nextTime, lastSource }
+}
+
 export const describeReadAloudError = (error: unknown): TranslationMessage | string => {
   if (error instanceof ApiError && error.kind === 'protocol') {
     return error.message
@@ -89,46 +187,38 @@ export const toggleReadAloud = (
   }
   const controller = new AbortController()
   const context = new AudioContext({ sampleRate: TTS_SAMPLE_RATE })
+  if (context.state === 'suspended') {
+    void context.resume().catch(() => {})
+  }
   current = { controller, context }
   useReadAloud.setState({ messageId, status: 'loading' })
   // 音色在开始朗读时读取，设置中切换后下一次朗读生效
-  const { apiKey, ttsVoice } = useSettings.getState()
+  const { apiKey, ttsVoice, ttsChannel } = useSettings.getState()
 
   void (async () => {
-    let nextTime = 0
-    let lastSource: AudioBufferSourceNode | null = null
-    let rest = new Uint8Array(0)
     try {
-      const stream = await synthesize(apiKey ?? '', text, ttsVoice, controller.signal)
-      const reader = stream.getReader()
-      controller.signal.addEventListener('abort', () => void reader.cancel().catch(() => {}))
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) {
-          break
-        }
-        const bytes = new Uint8Array(rest.length + value.length)
-        bytes.set(rest)
-        bytes.set(value, rest.length)
-        const samples = toFloat32(bytes)
-        rest = bytes.slice(samples.length * 2)
-        if (samples.length === 0) {
-          continue
-        }
-        const buffer = context.createBuffer(1, samples.length, TTS_SAMPLE_RATE)
-        buffer.copyToChannel(samples, 0)
-        const source = context.createBufferSource()
-        source.buffer = buffer
-        source.connect(context.destination)
-        // 网络慢于播放时从当前时间续上，不补播过去的时间
-        nextTime = Math.max(nextTime, context.currentTime + (lastSource ? 0 : START_DELAY))
-        source.start(nextTime)
-        nextTime += buffer.duration
-        lastSource = source
-        if (useReadAloud.getState().status === 'loading') {
-          useReadAloud.setState({ status: 'playing' })
-        }
-      }
+      const { stream, isPcm } = await synthesize(
+        apiKey ?? '',
+        text,
+        ttsVoice,
+        controller.signal,
+        ttsChannel.mode === 'custom' ? ttsChannel : undefined
+      )
+      const { lastSource } = await scheduleTtsStream({
+        context,
+        destination: context.destination,
+        stream,
+        isPcm,
+        signal: controller.signal,
+        initialNextTime: 0,
+        startDelay: START_DELAY,
+        onSource: () => {},
+        onFirstAudio: () => {
+          if (useReadAloud.getState().status === 'loading') {
+            useReadAloud.setState({ status: 'playing' })
+          }
+        },
+      })
       if (lastSource) {
         lastSource.onended = () => finish(controller)
       } else {

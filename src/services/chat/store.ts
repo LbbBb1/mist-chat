@@ -1,13 +1,25 @@
 import { create } from 'zustand'
+import { translate } from '../../i18n/index.js'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
+import {
+  blobToDataUrl,
+  generateImage,
+  recognizeWithOpenAIVision,
+  streamOpenAIMessage,
+  streamResponsesMessage,
+} from '../api/openai.js'
+import { getApiOrigin } from '../api/origin.js'
 import type { ChatModel, CreateMessageRequest } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
-import { useSettings } from '../settings.js'
+import { matchesRefusalKeyword, setImageGen, useSettings } from '../settings.js'
+import { toggleReadAloud } from '../speech/readAloud.js'
+import { recordTurnTokenUsage } from '../tokenUsage.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
+  addDraftFiles,
   clearAllDrafts,
   clearDraft,
   clearSentDraft,
@@ -15,10 +27,13 @@ import {
   prepareDraftMessage,
 } from './drafts.js'
 import { createLatestReminder } from './latestReminder.js'
+import { buildCrossChatMemory } from './memory.js'
+import { extractMemoriesFromTurn, formatSavedMemories } from './savedMemory.js'
 import {
   applyEvent,
   canContinueReply,
   getContextRounds,
+  getReplyText,
   settleReply,
   toRequestMessages,
 } from './reply.js'
@@ -34,22 +49,21 @@ import {
 
 /** deepseek-flash 同时支持深度思考与图片输入 */
 const MODEL: ChatModel = 'deepseek-flash'
-/** 所有生成请求统一携带的助手身份说明 */
-const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
-/** 安全审核固定开启，所有请求都走扩展模式 */
+/** 安全审核级别 */
 const SAFETY_CHECK = { level: 'high' } as const
 /** 服务端判定 file_id 失效后，重新补传并重发的最多次数（不含首次请求） */
 const FILE_RETRY_LIMIT = 2
 /** 退避基数，第 n 次重试等待 2^n 倍；连续失败达到上限就放弃，把原始报错展示出来 */
 const FILE_RETRY_BASE_DELAY = 1000
 
-/** 阅读链接始终开启，智能搜索开关控制是否另行声明搜索工具（含边想边搜）。 */
-const serverTools = (search: boolean): CreateMessageRequest['tools'] => {
-  const tools: CreateMessageRequest['tools'] = [
-    { type: 'deepseek_read_url', name: 'deepseek_read_url' },
-  ]
+/** 根据配置组装服务端工具声明：read_url 与 web_search 各自独立开关。 */
+const serverTools = (search: boolean, readUrl: boolean): CreateMessageRequest['tools'] => {
+  const tools: NonNullable<CreateMessageRequest['tools']> = []
+  if (readUrl) {
+    tools.push({ type: 'deepseek_read_url', name: 'deepseek_read_url' })
+  }
   if (search) {
     tools.push({ type: 'deepseek_web_search', name: 'deepseek_web_search' })
   }
@@ -255,17 +269,35 @@ export const bindChatPersistence = () => {
 
 /** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
 const createReply = (): AssistantMessage => {
-  const { thinking, search } = useSettings.getState()
+  const { thinking, search, model } = useSettings.getState()
   return {
     id: createId(),
     role: 'assistant',
     createdAt: Date.now(),
-    model: MODEL,
+    model: model.trim() || MODEL,
     thinking,
     search,
     prefix: true,
     status: 'pending',
     blocks: [],
+  }
+}
+
+/** 命中本地拒答关键词时直接生成拒答消息，不发起 API 请求。 */
+const createRefusedReply = (): AssistantMessage => {
+  const { refusalMessage, model } = useSettings.getState()
+  const text = refusalMessage.trim() || translate('replyRefused')
+  return {
+    id: createId(),
+    role: 'assistant',
+    createdAt: Date.now(),
+    model: model.trim() || MODEL,
+    thinking: false,
+    search: false,
+    prefix: false,
+    status: 'done',
+    stopReason: 'refusal',
+    blocks: [{ type: 'text', text, isTemplate: true }],
   }
 }
 
@@ -278,11 +310,12 @@ const settleInterrupted = (session: Session): Session => {
   ) {
     return session
   }
+  const { keepRefusedContent } = useSettings.getState()
   return {
     ...session,
     messages: session.messages.map((m) =>
       m.role === 'assistant' && (m.status === 'pending' || m.status === 'streaming')
-        ? settleReply(m, 'stopped', session.updatedAt)
+        ? settleReply(m, 'stopped', session.updatedAt, undefined, keepRefusedContent)
         : m
     ),
   }
@@ -541,26 +574,29 @@ const removeSessionData = async (id: string): Promise<boolean> => {
 
 export const stopReply = (sessionId: string) => getStreamController(sessionId)?.abort()
 
-/**
- * 提交指定会话的最新草稿；null 表示新建会话。
- * 同步接收成功才清空草稿，附件原件由会话接管；保存失败仍通过保存入口重试。
- */
-export const sendMessage = (targetSessionId: string | null) => {
-  if (get().importingHistory || !get().ready) {
-    return false
-  }
-  const prepared = prepareDraftMessage(getDraft(targetSessionId), useUploads.getState().tasks)
-  if (!prepared) {
-    return false
-  }
-  const { text, files } = prepared
+type SubmittedPromptFile = {
+  id: string
+  serverId: string | null
+  name: string
+  size: number
+  isImage: boolean
+  mimeType: string
+  blob?: Blob
+}
+
+const submitPrompt = (
+  targetSessionId: string | null,
+  text: string,
+  files: SubmittedPromptFile[],
+  options: { voiceCall?: boolean; imageGen?: boolean } = {}
+): { sessionId: string; replyId: string } | null => {
   const now = Date.now()
   let sessionId = targetSessionId
   if (
     sessionId !== null &&
     (deletingSessions.has(sessionId) || getStreamController(sessionId) || !getSession(sessionId))
   ) {
-    return false
+    return null
   }
   if (sessionId === null) {
     const session: Session = {
@@ -581,7 +617,7 @@ export const sendMessage = (targetSessionId: string | null) => {
   }
   const current = getSession(sessionId)
   if (!current) {
-    return false
+    return null
   }
   const history = getVisibleMessages(current)
   const question: UserMessage = {
@@ -598,21 +634,67 @@ export const sendMessage = (targetSessionId: string | null) => {
     })),
     createdAt: now,
   }
-  const reply = createReply()
+  const localRefused = matchesRefusalKeyword(question.content)
+  const reply = localRefused ? createRefusedReply() : createReply()
   updateSession(sessionId, (session) => ({
     ...appendBranch(session, history.at(-1)?.id ?? null, [question, reply]),
     updatedAt: now,
   }))
-  if (files.length > 0) {
-    pendingFiles.set(sessionId, [
-      ...(pendingFiles.get(sessionId) ?? []),
-      ...files.map(({ id, blob }) => ({ id, blob })),
-    ])
+  const blobs = files.flatMap(({ id, blob }) => (blob ? [{ id, blob }] : []))
+  if (blobs.length > 0) {
+    pendingFiles.set(sessionId, [...(pendingFiles.get(sessionId) ?? []), ...blobs])
   }
   persist(sessionId)
+  if (!localRefused) {
+    if (options.imageGen) {
+      const sourceFileIds = files.filter((file) => file.isImage).map((file) => file.id)
+      void runImageGeneration(sessionId, reply, text, sourceFileIds)
+    } else {
+      void streamReply(sessionId, reply, { history, question, voiceCall: options.voiceCall })
+    }
+  }
+  return { sessionId, replyId: reply.id }
+}
+
+/**
+ * 提交指定会话的最新草稿；null 表示新建会话。
+ * 同步接收成功才清空草稿，附件原件由会话接管；保存失败仍通过保存入口重试。
+ */
+export const sendMessage = (targetSessionId: string | null) => {
+  if (get().importingHistory || !get().ready) {
+    return false
+  }
+  const prepared = prepareDraftMessage(getDraft(targetSessionId), useUploads.getState().tasks)
+  if (!prepared) {
+    return false
+  }
+  const { imageGen, imageGenChannel } = useSettings.getState()
+  const submitted = submitPrompt(targetSessionId, prepared.text, prepared.files, {
+    imageGen:
+      imageGen &&
+      imageGenChannel.enabled &&
+      Boolean(imageGenChannel.model.trim()) &&
+      prepared.files.every((file) => file.isImage) &&
+      prepared.text.trim() !== '',
+  })
+  if (!submitted) {
+    return false
+  }
   clearSentDraft(targetSessionId)
-  void streamReply(sessionId, reply, { history, question })
   return true
+}
+
+/** 连续语音通话发送提问（可附带实时画面帧）；null 表示新建会话。 */
+export const sendVoicePrompt = (
+  targetSessionId: string | null,
+  content: string,
+  files: SubmittedPromptFile[] = []
+): { sessionId: string; replyId: string } | null => {
+  const text = content.trim()
+  if ((!text && files.length === 0) || get().importingHistory || !get().ready) {
+    return null
+  }
+  return submitPrompt(targetSessionId, text, files, { voiceCall: true })
 }
 
 /** 重新生成当前路径上的回答：在原问题下新增版本，不覆盖旧回答和后续对话。 */
@@ -632,13 +714,16 @@ export const regenerateReply = (sessionId: string, messageId?: string) => {
     return
   }
   const history = path.slice(0, index - 1)
-  const reply = createReply()
+  const localRefused = matchesRefusalKeyword(question.content)
+  const reply = localRefused ? createRefusedReply() : createReply()
   updateSession(sessionId, (s) => ({
     ...appendBranch(s, question.id, [reply]),
     updatedAt: Date.now(),
   }))
   persist(sessionId)
-  void streamReply(sessionId, reply, { history, question })
+  if (!localRefused) {
+    void streamReply(sessionId, reply, { history, question })
+  }
 }
 
 /** 编辑提问后新增同父版本，保留原文件；旧问题的所有回答与后续对话仍可切回。 */
@@ -664,13 +749,57 @@ export const editMessage = (sessionId: string, messageId: string, content: strin
     files: previous.files,
     createdAt: Date.now(),
   }
-  const reply = createReply()
+  const localRefused = matchesRefusalKeyword(question.content)
+  const reply = localRefused ? createRefusedReply() : createReply()
   updateSession(sessionId, (s) => ({
     ...appendBranch(s, path[index - 1]?.id ?? null, [question, reply]),
     updatedAt: Date.now(),
   }))
   persist(sessionId)
-  void streamReply(sessionId, reply, { history: path.slice(0, index), question })
+  if (!localRefused) {
+    void streamReply(sessionId, reply, { history: path.slice(0, index), question })
+  }
+  return true
+}
+
+/** 编辑助手回复并形成新的同父分支版本；旧回答与后续分支仍可切回。 */
+export const editAssistantMessage = (
+  sessionId: string,
+  messageId: string,
+  content: string
+): boolean => {
+  if (get().importingHistory || deletingSessions.has(sessionId)) {
+    return false
+  }
+  const session = getSession(sessionId)
+  if (!session || getStreamController(sessionId)) {
+    return false
+  }
+  const path = getVisibleMessages(session)
+  const index = path.findIndex((message) => message.id === messageId)
+  const previous = path[index]
+  const text = content.trim()
+  if (previous?.role !== 'assistant' || !text) {
+    return false
+  }
+  const edited: AssistantMessage = {
+    id: createId(),
+    role: 'assistant',
+    createdAt: Date.now(),
+    model: previous.model,
+    thinking: previous.thinking,
+    search: previous.search,
+    latestReminder: previous.latestReminder,
+    prefix: true,
+    status: 'done',
+    stopReason: 'end_turn',
+    blocks: [{ type: 'text', text }],
+  }
+  updateSession(sessionId, (s) => ({
+    ...appendBranch(s, path[index - 1]?.id ?? null, [edited]),
+    updatedAt: Date.now(),
+  }))
+  persist(sessionId)
   return true
 }
 
@@ -697,19 +826,19 @@ export const continueReply = (sessionId: string, messageId: string) => {
   const path = getVisibleMessages(session)
   const question = path.at(-2)
   const previous = path.at(-1)
+  const { thinking, search, model, allowRefusedContext } = useSettings.getState()
   if (
     question?.role !== 'user' ||
     previous?.role !== 'assistant' ||
     previous.id !== messageId ||
-    !canContinueReply(previous)
+    !canContinueReply(previous, allowRefusedContext)
   ) {
     return
   }
-  const { thinking, search } = useSettings.getState()
   const reply: AssistantMessage = {
     ...previous,
     // 未记录请求配置的回复，续写时使用默认模型和当前开关。
-    model: previous.model ?? MODEL,
+    model: previous.model ?? (model.trim() || MODEL),
     thinking: previous.thinking ?? thinking,
     search: previous.search ?? search,
     status: 'pending',
@@ -749,7 +878,12 @@ export const retryUpload = (sessionId: string, messageId: string) => {
   void streamReply(sessionId, reply, { history: path.slice(0, index - 1), question })
 }
 
-type Request = { history: Message[]; question: UserMessage; prefix?: AssistantMessage }
+type Request = {
+  history: Message[]
+  question: UserMessage
+  prefix?: AssistantMessage
+  voiceCall?: boolean
+}
 
 /** 把补传得到的 serverId 写回会话里所有引用同一附件的消息（编辑、重新生成会共用附件） */
 const saveServerIds = (sessionId: string, serverIds: Map<string, string>) => {
@@ -843,8 +977,9 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
     throw failed.reason
   }
 
+  const { allowRefusedContext } = useSettings.getState()
   const pending = new Map<string, FileAttachment>()
-  for (const [user] of getContextRounds(request.history).toReversed()) {
+  for (const [user] of getContextRounds(request.history, allowRefusedContext).toReversed()) {
     for (const file of user.files) {
       if (!file.serverId && !serverIds.has(file.id) && !pending.has(file.id)) {
         pending.set(file.id, file)
@@ -886,7 +1021,8 @@ const collectServerFileIds = (request: Request): Set<string> => {
     }
   }
   add(request.question.files)
-  for (const [user] of getContextRounds(request.history)) {
+  const { allowRefusedContext } = useSettings.getState()
+  for (const [user] of getContextRounds(request.history, allowRefusedContext)) {
     add(user.files)
   }
   return ids
@@ -954,8 +1090,473 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
     signal.addEventListener('abort', onAbort, { once: true })
   })
 
+const TEXT_MIME_RE =
+  /^text\/|application\/(json|xml|javascript|typescript|x-yaml|yaml|csv|markdown)/i
+const TEXT_EXT_RE =
+  /\.(txt|md|markdown|json|csv|tsv|yaml|yml|xml|html|htm|css|js|jsx|ts|tsx|py|go|rs|java|c|cpp|h|hpp|sh|sql|log|ini|toml|env)$/i
+
+const findLocalBlob = async (sessionId: string, fileId: string): Promise<Blob | undefined> => {
+  const pending = pendingFiles.get(sessionId)?.find((item) => item.id === fileId)?.blob
+  return pending ?? (await db.loadFile(fileId))
+}
+
 /**
- * 请求并消费流：先补齐附件的 serverId，再发请求；流式增量按动画帧刷新内存，完成、失败或停止后落盘。
+ * 读取并预处理本轮及历史附件（供 OpenAI 兼容或自定义图片识别/文字识别渠道使用）：
+ * - 自定义图片识别渠道：用外部视觉模型把图片转为文字描述并附加到提问；
+ * - 自定义文字识别渠道 / OpenAI 内联：把纯文本文件或图片数据转为请求内联块。
+ */
+const prepareInlineAttachments = async (
+  sessionId: string,
+  request: Request,
+  signal: AbortSignal
+): Promise<{
+  question: UserMessage
+  inlineImages: Map<string, string>
+  inlineTexts: Map<string, string>
+}> => {
+  const settings = useSettings.getState()
+  const inlineImages = new Map<string, string>()
+  const inlineTexts = new Map<string, string>()
+  const extraNotes: string[] = []
+  const strippedFileIds = new Set<string>()
+
+  const allFiles: FileAttachment[] = [...request.question.files]
+  for (const [user] of getContextRounds(request.history, settings.allowRefusedContext)) {
+    allFiles.push(...user.files)
+  }
+
+  for (const file of allFiles) {
+    signal.throwIfAborted()
+    const key = file.serverId ?? file.id
+    const isCurrentQuestionFile = request.question.files.some((f) => f.id === file.id)
+    const blob = await findLocalBlob(sessionId, file.id)
+    if (!blob) {
+      continue
+    }
+
+    if (file.isImage) {
+      const dataUrl = await blobToDataUrl(blob)
+      if (settings.visionChannel.mode === 'custom' && isCurrentQuestionFile) {
+        const visionKey = settings.visionChannel.apiKey.trim() || settings.apiKey || ''
+        const visionOrigin = settings.visionChannel.baseUrl.trim() || getApiOrigin()
+        const visionModel = settings.visionChannel.model.trim() || settings.model
+        const desc = await recognizeWithOpenAIVision({
+          baseUrl: visionOrigin,
+          apiKey: visionKey,
+          model: visionModel,
+          prompt: `请详细识别并描述这张图片（${file.name}）中的关键内容、文字与细节，供后续对话回答使用。`,
+          dataUrl,
+          signal,
+        })
+        if (desc) {
+          extraNotes.push(`[图片识别（${file.name}）：${desc}]`)
+        }
+        strippedFileIds.add(file.id)
+      } else if (settings.chatProtocol !== 'deepseek') {
+        inlineImages.set(key, dataUrl)
+      }
+      continue
+    }
+
+    // 非图片文件（文档 / 文字识别）
+    const isTextReadable = TEXT_MIME_RE.test(file.mimeType) || TEXT_EXT_RE.test(file.name)
+    if (settings.ocrChannel.mode === 'custom' && isCurrentQuestionFile) {
+      if (isTextReadable && blob.size <= 512 * 1024) {
+        const content = await blob.text()
+        extraNotes.push(`[文件文本（${file.name}）：\n${content.slice(0, 12000)}]`)
+      } else {
+        const ocrKey = settings.ocrChannel.apiKey.trim() || settings.apiKey || ''
+        const ocrOrigin = settings.ocrChannel.baseUrl.trim() || getApiOrigin()
+        const ocrModel = settings.ocrChannel.model.trim() || settings.model
+        const dataUrl = await blobToDataUrl(blob)
+        const text = await recognizeWithOpenAIVision({
+          baseUrl: ocrOrigin,
+          apiKey: ocrKey,
+          model: ocrModel,
+          prompt: `请完整提取并识别文件「${file.name}」中的所有文字内容。`,
+          dataUrl,
+          signal,
+        })
+        if (text) {
+          extraNotes.push(`[文字识别（${file.name}）：${text}]`)
+        }
+      }
+      strippedFileIds.add(file.id)
+    } else if (settings.chatProtocol !== 'deepseek' && isTextReadable && blob.size <= 512 * 1024) {
+      const content = await blob.text()
+      inlineTexts.set(key, `[文件：${file.name}]\n${content.slice(0, 12000)}`)
+    }
+  }
+
+  const question: UserMessage =
+    extraNotes.length === 0 && strippedFileIds.size === 0
+      ? request.question
+      : {
+          ...request.question,
+          content: [request.question.content, ...extraNotes].filter(Boolean).join('\n\n'),
+          files: request.question.files.filter((file) => !strippedFileIds.has(file.id)),
+        }
+
+  return { question, inlineImages, inlineTexts }
+}
+
+const IMAGE_GEN_TAG_RE = /<generate_image>([\s\S]*?)<\/generate_image>/i
+
+const readImageDimensions = async (
+  blob: Blob
+): Promise<{ width: number; height: number } | null> => {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(blob)
+      const dims = { width: bitmap.width, height: bitmap.height }
+      bitmap.close()
+      return dims
+    } catch {
+      // 回退到 Image 元素读取尺寸
+    }
+  }
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(null)
+    }
+    img.src = url
+  })
+}
+
+/** 根据参考图宽高比自动匹配最接近的生图尺寸 */
+const resolveSizeFromReference = async (blob: Blob): Promise<string | undefined> => {
+  const dims = await readImageDimensions(blob)
+  if (!dims || dims.width <= 0 || dims.height <= 0) {
+    return undefined
+  }
+  const ratio = dims.width / dims.height
+  if (ratio >= 1.6) {
+    return '1792x1024'
+  }
+  if (ratio > 1.18) {
+    return '1536x1024'
+  }
+  if (ratio >= 0.85) {
+    return '1024x1024'
+  }
+  if (ratio >= 0.6) {
+    return '1024x1536'
+  }
+  return '1024x1792'
+}
+
+const saveAndCreateImageBlock = async (
+  prompt: string,
+  signal: AbortSignal,
+  sessionId?: string,
+  sourceFileIds: string[] = [],
+  sizeOverride?: string
+): Promise<{
+  fileId: string
+  mimeType: string
+  revisedPrompt?: string
+  resolvedSize?: string
+}> => {
+  const settings = useSettings.getState()
+  const { imageGenChannel } = settings
+  const baseUrl = imageGenChannel.baseUrl.trim() || getApiOrigin()
+  const apiKey = imageGenChannel.apiKey.trim() || settings.apiKey || ''
+  const model = imageGenChannel.model.trim()
+  if (!model) {
+    throw new ApiError('protocol', '未配置生图模型名称，请在设置 → 模型与接口中填写生图模型')
+  }
+  const referenceImages: { blob: Blob; name: string; mimeType: string }[] = []
+  if (sessionId && sourceFileIds.length > 0) {
+    const session = getSession(sessionId)
+    const fileMeta = new Map<string, FileAttachment>()
+    if (session) {
+      for (const m of session.messages) {
+        if (m.role === 'user') {
+          for (const f of m.files) {
+            fileMeta.set(f.id, f)
+          }
+        }
+      }
+    }
+    for (const id of sourceFileIds) {
+      signal.throwIfAborted()
+      const blob = await findLocalBlob(sessionId, id)
+      if (!blob) {
+        continue
+      }
+      const meta = fileMeta.get(id)
+      referenceImages.push({
+        blob,
+        name: meta?.name ?? 'reference.png',
+        mimeType: meta?.mimeType || blob.type || 'image/png',
+      })
+    }
+  }
+  let targetSize = (sizeOverride ?? imageGenChannel.size ?? '').trim()
+  if (
+    referenceImages.length > 0 &&
+    (!targetSize || targetSize === 'auto' || targetSize === 'match')
+  ) {
+    targetSize = (await resolveSizeFromReference(referenceImages[0].blob)) ?? targetSize
+  } else if (targetSize === 'match') {
+    targetSize = 'auto'
+  }
+  const generated = await generateImage({
+    baseUrl,
+    apiKey,
+    model,
+    prompt,
+    size: targetSize || undefined,
+    protocol: imageGenChannel.protocol,
+    preferResponses: settings.chatProtocol === 'responses',
+    customHeadersRaw: imageGenChannel.customHeaders.trim() || settings.customHeaders,
+    referenceImages,
+    signal,
+  })
+  const fileId = createId()
+  await db.saveFiles([{ id: fileId, blob: generated.blob }])
+  return {
+    fileId,
+    mimeType: generated.mimeType,
+    revisedPrompt: generated.revisedPrompt,
+    resolvedSize: targetSize || undefined,
+  }
+}
+
+const updateImageBlockAt = (
+  sessionId: string,
+  messageId: string,
+  blockIndex: number,
+  updater: (
+    block: Extract<AssistantMessage['blocks'][number], { type: 'image' }>
+  ) => AssistantMessage['blocks'][number]
+) => {
+  updateSession(sessionId, (session) => ({
+    ...session,
+    messages: session.messages.map((message) => {
+      if (message.id !== messageId || message.role !== 'assistant') {
+        return message
+      }
+      const target = message.blocks[blockIndex]
+      if (target?.type !== 'image') {
+        return message
+      }
+      const blocks = [...message.blocks]
+      blocks[blockIndex] = updater(target)
+      return { ...message, blocks }
+    }),
+  }))
+}
+
+/** 确认（或重试）一条待确认的生图块 */
+export const confirmImageGeneration = async (
+  sessionId: string,
+  messageId: string,
+  blockIndex: number,
+  promptOverride?: string,
+  sizeOverride?: string
+) => {
+  if (get().importingHistory || deletingSessions.has(sessionId) || getStreamController(sessionId)) {
+    return
+  }
+  const session = getSession(sessionId)
+  const message = session?.messages.find((m) => m.id === messageId)
+  const block = message?.role === 'assistant' ? message.blocks[blockIndex] : undefined
+  if (block?.type !== 'image') {
+    return
+  }
+  const prompt = (promptOverride ?? block.prompt ?? '').trim()
+  if (!prompt) {
+    return
+  }
+  const chosenSize = (
+    sizeOverride ??
+    block.size ??
+    useSettings.getState().imageGenChannel.size
+  ).trim()
+
+  const controller = new AbortController()
+  set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
+  updateImageBlockAt(sessionId, messageId, blockIndex, (item) => ({
+    ...item,
+    prompt,
+    size: chosenSize,
+    status: 'generating',
+    error: undefined,
+  }))
+  persist(sessionId)
+
+  try {
+    const result = await saveAndCreateImageBlock(
+      prompt,
+      controller.signal,
+      sessionId,
+      block.sourceFileIds ?? [],
+      chosenSize
+    )
+    updateImageBlockAt(sessionId, messageId, blockIndex, (item) => ({
+      type: 'image',
+      fileId: result.fileId,
+      mimeType: result.mimeType,
+      prompt,
+      size: result.resolvedSize ?? chosenSize,
+      ...(item.sourceFileIds?.length ? { sourceFileIds: item.sourceFileIds } : {}),
+      status: 'done',
+    }))
+  } catch (error) {
+    if (controller.signal.aborted) {
+      updateImageBlockAt(sessionId, messageId, blockIndex, (item) => ({
+        ...item,
+        status: 'pending_confirm',
+      }))
+    } else {
+      const errMsg = error instanceof Error ? error.message : String(error)
+      updateImageBlockAt(sessionId, messageId, blockIndex, (item) => ({
+        ...item,
+        status: 'error',
+        error: errMsg,
+      }))
+    }
+  } finally {
+    set((state) => ({
+      streaming: Object.fromEntries(
+        Object.entries(state.streaming).filter(([id]) => id !== sessionId)
+      ),
+    }))
+    persist(sessionId)
+  }
+}
+
+/** 取消一条待确认的生图块 */
+export const cancelImageGeneration = (sessionId: string, messageId: string, blockIndex: number) => {
+  if (get().importingHistory || deletingSessions.has(sessionId)) {
+    return
+  }
+  updateImageBlockAt(sessionId, messageId, blockIndex, (item) => ({
+    ...item,
+    status: 'cancelled',
+    error: undefined,
+  }))
+  persist(sessionId)
+}
+
+/** 将已生成的图片带入输入框草稿作为参考图，并开启生图模式（方便继续图生图） */
+export const reuseGeneratedImageInDraft = async (
+  sessionId: string | null,
+  fileId: string,
+  mimeType: string
+): Promise<boolean> => {
+  const blob = await db.loadFile(fileId)
+  if (!blob) {
+    return false
+  }
+  const ext = mimeType.includes('jpeg') ? 'jpg' : mimeType.includes('webp') ? 'webp' : 'png'
+  const file = new File([blob], `reference-${fileId.slice(0, 8)}.${ext}`, {
+    type: mimeType || 'image/png',
+  })
+  setImageGen(true)
+  addDraftFiles(sessionId, [file], useSettings.getState().apiKey ?? '')
+  return true
+}
+
+/** 直接生图模式：若开启了生图前确认，则先生成待确认卡片；否则直接调用生图渠道 */
+const runImageGeneration = async (
+  sessionId: string,
+  initial: AssistantMessage,
+  prompt: string,
+  sourceFileIds: string[] = []
+) => {
+  const { imageGenChannel } = useSettings.getState()
+  const initialSize =
+    sourceFileIds.length > 0 && (!imageGenChannel.size || imageGenChannel.size === 'auto')
+      ? 'match'
+      : imageGenChannel.size || 'auto'
+
+  if (imageGenChannel.requireConfirm) {
+    const pendingReply: AssistantMessage = {
+      ...initial,
+      status: 'done',
+      stopReason: 'end_turn',
+      blocks: [
+        {
+          type: 'image',
+          fileId: '',
+          mimeType: 'image/png',
+          prompt,
+          size: initialSize,
+          ...(sourceFileIds.length > 0 ? { sourceFileIds } : {}),
+          status: 'pending_confirm',
+        },
+      ],
+    }
+    updateReply(sessionId, pendingReply)
+    persist(sessionId)
+    return
+  }
+  const controller = new AbortController()
+  set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
+  let reply = initial
+  try {
+    const result = await saveAndCreateImageBlock(
+      prompt,
+      controller.signal,
+      sessionId,
+      sourceFileIds,
+      initialSize
+    )
+    reply = {
+      ...reply,
+      status: 'done',
+      stopReason: 'end_turn',
+      blocks: [
+        {
+          type: 'image',
+          fileId: result.fileId,
+          mimeType: result.mimeType,
+          prompt,
+          size: result.resolvedSize ?? initialSize,
+          ...(sourceFileIds.length > 0 ? { sourceFileIds } : {}),
+          status: 'done',
+        },
+        ...(result.revisedPrompt ? [{ type: 'text' as const, text: result.revisedPrompt }] : []),
+      ],
+    }
+  } catch (error) {
+    if (controller.signal.aborted) {
+      reply = settleReply(reply, 'stopped', Date.now())
+    } else if (error instanceof ApiError) {
+      reply = settleReply(reply, 'error', Date.now(), {
+        kind: error.kind,
+        message: error.message,
+        status: error.status,
+        localMessage: error.localMessage,
+      })
+    } else {
+      reply = settleReply(reply, 'error', Date.now(), {
+        kind: 'protocol',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  } finally {
+    updateReply(sessionId, reply)
+    set((state) => ({
+      streaming: Object.fromEntries(
+        Object.entries(state.streaming).filter(([id]) => id !== sessionId)
+      ),
+    }))
+    persist(sessionId)
+  }
+}
+
+/**
+ * 请求并消费流：先补齐附件的 serverId（或预处理识别），再发请求；流式增量按动画帧刷新内存，完成、失败或停止后落盘。
  * 补传失败时回复记为 upload 错误，可重试。
  * 服务端判定 file_id 失效时重新补传后重发，退避重试且次数有上限，超过则按原始报错收尾。
  */
@@ -980,35 +1581,118 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       let preparing = true
       let receivedContent = false
       try {
-        const prepared = await prepareFiles(sessionId, request, controller.signal)
+        const settings = useSettings.getState()
+        const useDeepSeekFiles =
+          settings.chatProtocol === 'deepseek' &&
+          settings.visionChannel.mode === 'inherit' &&
+          settings.ocrChannel.mode === 'inherit'
+        const prepared = useDeepSeekFiles
+          ? await prepareFiles(sessionId, request, controller.signal)
+          : {
+              history: request.history,
+              question: request.question,
+              prefix: request.prefix,
+            }
+        const inlinePrepared = useDeepSeekFiles
+          ? {
+              question: prepared.question,
+              inlineImages: new Map<string, string>(),
+              inlineTexts: new Map<string, string>(),
+            }
+          : await prepareInlineAttachments(sessionId, prepared, controller.signal)
         preparing = false
         // 附件就绪后获取本轮信息；续写沿用原回答快照，重新生成的快照独立保存。
-        const latestReminder = prepared.prefix
-          ? prepared.prefix.latestReminder
-          : createLatestReminder(useSettings.getState())
-        reply = { ...reply, latestReminder }
+        const latestReminder = settings.sendLatestReminder
+          ? prepared.prefix
+            ? prepared.prefix.latestReminder
+            : createLatestReminder(settings)
+          : undefined
+        reply = { ...reply, ...(latestReminder ? { latestReminder } : {}) }
         updateReply(sessionId, reply)
         persist(sessionId)
         const messages = toRequestMessages(
           prepared.history,
-          prepared.question,
+          inlinePrepared.question,
           prepared.prefix,
           initial.thinking ?? false,
-          latestReminder
+          latestReminder,
+          settings.allowRefusedContext,
+          settings.chatProtocol !== 'deepseek'
         )
-        const events = streamMessage(
-          useSettings.getState().apiKey ?? '',
-          {
-            model: initial.model ?? MODEL,
-            system: SYSTEM_PROMPT,
-            messages,
-            thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
-            safety_check: SAFETY_CHECK,
-            tools: serverTools(initial.search ?? false),
-            ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
-          },
-          controller.signal
-        )
+        const baseSystem = settings.systemPrompt.trim()
+        const voiceSystem = request.voiceCall ? settings.voiceSystemPrompt.trim() : ''
+        const visionHint =
+          request.voiceCall && prepared.question.files.some((file) => file.isImage)
+            ? '当前为实时视频通话，用户消息附带的图片是此刻摄像头实时画面，请像面对面看画面一样直接自然回应。'
+            : ''
+        const canModelGenerateImage =
+          settings.imageGenChannel.enabled && Boolean(settings.imageGenChannel.model.trim())
+        const imageGenHint = canModelGenerateImage
+          ? '你已接入生图模型，具备直接为用户生成图片与图生图（基于用户上传的参考图片修改或重绘）的能力。当用户要求画画、生成图片、设计配图、修改图片或图生图时，绝对不要说“我无法生成图片”，而是在回复末尾输出一行标记：<generate_image>详细的英文或中文绘画/改图提示词</generate_image>。客户端会自动提取该提示词（若有本轮上传图片也会一并作为参考图）调用生图模型展示给用户。如果用户只是普通聊天或询问图片内容而非要求画图/改图，不要输出该标记。'
+          : ''
+        const savedMemoryContext = settings.savedMemoryEnabled ? formatSavedMemories() : ''
+        const memoryContext = settings.crossChatMemory
+          ? await buildCrossChatMemory({
+              currentSessionId: sessionId,
+              query: inlinePrepared.question.content,
+              sessions: get().sessions,
+              sessionCache: get().sessionCache,
+              maxSessions: settings.crossChatMemoryLimit,
+              allowRefused: settings.allowRefusedContext,
+              signal: controller.signal,
+            })
+          : ''
+        if (controller.signal.aborted) {
+          reply = settleReply(reply, 'stopped', Date.now(), undefined, settings.keepRefusedContent)
+          break
+        }
+        const system = [
+          baseSystem,
+          voiceSystem,
+          visionHint,
+          imageGenHint,
+          savedMemoryContext,
+          memoryContext,
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+        const tools = serverTools(initial.search ?? false, settings.readUrl)
+        const requestBody: CreateMessageRequest = {
+          model: initial.model ?? (settings.model.trim() || MODEL),
+          ...(system ? { system } : {}),
+          messages,
+          thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
+          ...(settings.safetyCheck ? { safety_check: SAFETY_CHECK } : {}),
+          ...(tools && tools.length > 0 ? { tools } : {}),
+          ...(settings.temperature !== null ? { temperature: settings.temperature } : {}),
+          ...(settings.topP !== null ? { top_p: settings.topP } : {}),
+          ...(settings.maxTokens !== null ? { max_tokens: settings.maxTokens } : {}),
+          ...(settings.autoTitle && titleRequests.has(controller)
+            ? { title: { enabled: true } }
+            : {}),
+        }
+        const events =
+          settings.chatProtocol === 'responses'
+            ? streamResponsesMessage(
+                settings.apiOrigin || getApiOrigin(),
+                settings.apiKey ?? '',
+                requestBody,
+                controller.signal,
+                inlinePrepared.inlineImages,
+                inlinePrepared.inlineTexts,
+                settings.customHeaders
+              )
+            : settings.chatProtocol === 'openai' || settings.chatProtocol === 'local'
+              ? streamOpenAIMessage(
+                  settings.apiOrigin || getApiOrigin(),
+                  settings.apiKey ?? '',
+                  requestBody,
+                  controller.signal,
+                  inlinePrepared.inlineImages,
+                  inlinePrepared.inlineTexts,
+                  settings.customHeaders
+                )
+              : streamMessage(settings.apiKey ?? '', requestBody, controller.signal)
         const blockIndexes = new Map<number, number>()
         for await (const event of events) {
           receivedContent ||= event.type === 'content_block_start'
@@ -1031,11 +1715,112 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             frame ||= requestAnimationFrame(flush)
           }
         }
-        reply = settleReply(reply, 'done', Date.now())
+        reply = settleReply(reply, 'done', Date.now(), undefined, settings.keepRefusedContent)
+
+        // 若模型在回复中输出了 <generate_image>...</generate_image>，按确认开关决定先确认或立即生图
+        if (canModelGenerateImage && reply.stopReason !== 'refusal') {
+          const match = IMAGE_GEN_TAG_RE.exec(getReplyText(reply))
+          const imgPrompt = match?.[1]?.trim()
+          if (imgPrompt) {
+            const sourceFileIds = prepared.question.files
+              .filter((file) => file.isImage)
+              .map((file) => file.id)
+            reply = {
+              ...reply,
+              blocks: reply.blocks.map((block) =>
+                block.type === 'text'
+                  ? { ...block, text: block.text.replace(IMAGE_GEN_TAG_RE, '').trim() }
+                  : block
+              ),
+            }
+            const initialSize =
+              sourceFileIds.length > 0 ? 'match' : settings.imageGenChannel.size || 'auto'
+            if (settings.imageGenChannel.requireConfirm) {
+              reply = {
+                ...reply,
+                blocks: [
+                  ...reply.blocks,
+                  {
+                    type: 'image',
+                    fileId: '',
+                    mimeType: 'image/png',
+                    prompt: imgPrompt,
+                    size: initialSize,
+                    ...(sourceFileIds.length > 0 ? { sourceFileIds } : {}),
+                    status: 'pending_confirm',
+                  },
+                ],
+              }
+            } else {
+              updateReply(sessionId, reply)
+              try {
+                const generated = await saveAndCreateImageBlock(
+                  imgPrompt,
+                  controller.signal,
+                  sessionId,
+                  sourceFileIds,
+                  initialSize
+                )
+                reply = {
+                  ...reply,
+                  blocks: [
+                    ...reply.blocks,
+                    {
+                      type: 'image',
+                      fileId: generated.fileId,
+                      mimeType: generated.mimeType,
+                      prompt: imgPrompt,
+                      size: generated.resolvedSize ?? initialSize,
+                      ...(sourceFileIds.length > 0 ? { sourceFileIds } : {}),
+                      status: 'done',
+                    },
+                  ],
+                }
+              } catch (imgError) {
+                if (!controller.signal.aborted) {
+                  const errText = imgError instanceof Error ? imgError.message : String(imgError)
+                  reply = {
+                    ...reply,
+                    blocks: [...reply.blocks, { type: 'text', text: `\n\n[生图失败：${errText}]` }],
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (
+          settings.autoExtractMemory &&
+          settings.savedMemoryEnabled &&
+          reply.stopReason !== 'refusal' &&
+          inlinePrepared.question.content.trim()
+        ) {
+          void extractMemoriesFromTurn({
+            apiKey: settings.apiKey ?? '',
+            model: initial.model ?? (settings.model.trim() || MODEL),
+            protocol: settings.chatProtocol,
+            baseUrl: settings.apiOrigin,
+            customHeaders: settings.customHeaders,
+            userText: inlinePrepared.question.content,
+            assistantText: getReplyText(reply),
+          })
+        }
+        if (
+          useSettings.getState().autoPlayVoice &&
+          !controller.signal.aborted &&
+          reply.stopReason !== 'refusal' &&
+          get().activeId === sessionId
+        ) {
+          const spokenText = getReplyText(reply).trim()
+          if (spokenText) {
+            toggleReadAloud(reply.id, spokenText, () => {})
+          }
+        }
         break
       } catch (error) {
+        const { keepRefusedContent } = useSettings.getState()
         if (controller.signal.aborted) {
-          reply = settleReply(reply, 'stopped', Date.now())
+          reply = settleReply(reply, 'stopped', Date.now(), undefined, keepRefusedContent)
           break
         }
         if (preparing) {
@@ -1055,26 +1840,38 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         ) {
           await waitForRetry(attempt, controller.signal)
           if (controller.signal.aborted) {
-            reply = settleReply(reply, 'stopped', Date.now())
+            reply = settleReply(reply, 'stopped', Date.now(), undefined, keepRefusedContent)
             break
           }
           continue
         }
         if (error instanceof ApiError && error.kind === 'interrupted' && reply.stopReason) {
           // 已收到 message_delta 的结束原因，只是缺了结尾的 message_stop
-          reply = settleReply(reply, 'done', Date.now())
+          reply = settleReply(reply, 'done', Date.now(), undefined, keepRefusedContent)
         } else if (error instanceof ApiError) {
-          reply = settleReply(reply, 'error', Date.now(), {
-            kind: error.kind,
-            message: error.message,
-            status: error.status,
-            localMessage: error.localMessage,
-          })
+          reply = settleReply(
+            reply,
+            'error',
+            Date.now(),
+            {
+              kind: error.kind,
+              message: error.message,
+              status: error.status,
+              localMessage: error.localMessage,
+            },
+            keepRefusedContent
+          )
         } else {
-          reply = settleReply(reply, 'error', Date.now(), {
-            kind: 'protocol',
-            message: error instanceof Error ? error.message : String(error),
-          })
+          reply = settleReply(
+            reply,
+            'error',
+            Date.now(),
+            {
+              kind: 'protocol',
+              message: error instanceof Error ? error.message : String(error),
+            },
+            keepRefusedContent
+          )
         }
         break
       }
@@ -1083,6 +1880,9 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     titleRequests.delete(controller)
     streamFlushes.delete(sessionId)
     cancelAnimationFrame(frame)
+    if (reply.usage) {
+      recordTurnTokenUsage(reply.usage)
+    }
     updateReply(sessionId, reply)
     set((state) => ({
       streaming: Object.fromEntries(

@@ -9,6 +9,7 @@ import {
   validateFiles,
   type UploadTask,
 } from '../attachments.js'
+import { useSettings } from '../settings.js'
 import type { FileAttachment } from './types.js'
 
 export type DraftAttachment = {
@@ -17,6 +18,19 @@ export type DraftAttachment = {
   file: File
   isImage: boolean
   previewUrl: string | null
+  /** 非 DeepSeek Files API 模式（OpenAI / Responses / 自定义识别 / 图生图）时本地直读，无需远程预传 */
+  localReady?: boolean
+}
+
+/** 仅当主协议为 DeepSeek 且未切走视觉/OCR 且未开启生图直出时，才需要预先上传到 DeepSeek Files API */
+export const shouldUseLocalAttachmentOnly = (): boolean => {
+  const { chatProtocol, visionChannel, ocrChannel, imageGen } = useSettings.getState()
+  return (
+    chatProtocol !== 'deepseek' ||
+    visionChannel.mode === 'custom' ||
+    ocrChannel.mode === 'custom' ||
+    imageGen
+  )
 }
 
 type Draft = { text: string; attachments: DraftAttachment[] }
@@ -70,6 +84,7 @@ export const addDraftFiles = (
   if (error) {
     return error
   }
+  const localOnly = shouldUseLocalAttachmentOnly()
   const added = files.map((file): DraftAttachment => {
     const image = isImage(resolveMimeType(file))
     return {
@@ -77,10 +92,13 @@ export const addDraftFiles = (
       file,
       isImage: image,
       previewUrl: image ? URL.createObjectURL(file) : null,
+      ...(localOnly ? { localReady: true } : {}),
     }
   })
   updateDraft(sessionId, (draft) => ({ ...draft, attachments: [...draft.attachments, ...added] }))
-  added.forEach((attachment) => upload(attachment, apiKey))
+  if (!localOnly) {
+    added.forEach((attachment) => upload(attachment, apiKey))
+  }
   return null
 }
 
@@ -95,21 +113,23 @@ export const retryDraftAttachment = (
   }
 }
 
-/** 发送按钮和实际提交共用规则：有内容，且全部附件已上传成功。 */
+/** 发送按钮和实际提交共用规则：有内容，且全部附件已就绪。 */
 export const prepareDraftMessage = (draft: Draft, tasks: Record<string, UploadTask>) => {
   const text = draft.text.trim()
   if (!text && draft.attachments.length === 0) {
     return null
   }
-  const files: (FileAttachment & { serverId: string; blob: Blob })[] = []
+  const localOnly = shouldUseLocalAttachmentOnly()
+  const files: (FileAttachment & { serverId: string | null; blob: Blob })[] = []
   for (const attachment of draft.attachments) {
     const task = tasks[attachment.id]
-    if (task?.status !== 'done' || !task.serverId) {
+    const readyLocally = Boolean(attachment.localReady || localOnly)
+    if (!readyLocally && (task?.status !== 'done' || !task.serverId)) {
       return null
     }
     files.push({
       id: attachment.id,
-      serverId: task.serverId,
+      serverId: task?.status === 'done' && task.serverId ? task.serverId : null,
       name: attachment.file.name,
       size: attachment.file.size,
       isImage: attachment.isImage,

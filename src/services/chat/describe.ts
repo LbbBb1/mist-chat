@@ -16,7 +16,10 @@ const getTemplateText = (reply: AssistantMessage) =>
     .join('')
 
 /** 回复出错或未正常结束时展示的提示 */
-export const describeReply = (reply: AssistantMessage): Notice | null => {
+export const describeReply = (
+  reply: AssistantMessage,
+  options?: { refusalMessage?: string; hasVisibleAnswer?: boolean }
+): Notice | null => {
   if (reply.status === 'error' && reply.error) {
     const { kind, status, localMessage } = reply.error
     // 导入的历史可能来自不同版本；不识别的文案沿用保存时的原文。
@@ -50,8 +53,12 @@ export const describeReply = (reply: AssistantMessage): Notice | null => {
     return { text: template }
   }
   if (reply.stopReason === 'refusal') {
-    // 导入的拒绝回复优先展示归档中的模板，普通正文仍不可展示。
-    return { text: template || translate('replyRefused'), presentation: 'response' }
+    const text = template || options?.refusalMessage?.trim() || translate('replyRefused')
+    // 保留已输出内容且存在可见正文时，仅作为底部提示，不替换正文。
+    if (options?.hasVisibleAnswer) {
+      return { text }
+    }
+    return { text, presentation: 'response' }
   }
   if (template) {
     return { text: template, presentation: 'response' }

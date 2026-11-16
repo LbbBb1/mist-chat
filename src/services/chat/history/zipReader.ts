@@ -59,11 +59,20 @@ const checkExtra = (bytes: Uint8Array) => {
 }
 
 const decodePath = (bytes: Uint8Array, flags: number) => {
-  // 非 UTF-8 编码的 ZIP 文件名仅接受 ASCII，确保附件路径解码准确。
-  if (!(flags & 0x800) && bytes.some((byte) => byte > 0x7f)) {
-    invalid()
+  let path = ''
+  try {
+    path = new TextDecoder('utf-8', { fatal: true }).decode(bytes).normalize('NFC')
+  } catch {
+    if (flags & 0x800) {
+      invalid()
+    }
+    // 部分 Windows / 第三方工具重新打包时未设置 UTF-8 标志且采用 GBK 编码
+    try {
+      path = new TextDecoder('gb18030', { fatal: true }).decode(bytes).normalize('NFC')
+    } catch {
+      return invalid()
+    }
   }
-  const path = new TextDecoder('utf-8', { fatal: true }).decode(bytes).normalize('NFC')
   if (!path || path.includes('\\') || path.includes('\0') || /^[A-Za-z]:/.test(path)) {
     invalid()
   }
@@ -136,9 +145,9 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
     const extraLength = view.getUint16(30, true)
     const next = cursor + 46 + nameLength + extraLength + view.getUint16(32, true)
     const entryOffset = view.getUint32(42, true)
-    // 只允许 deflate 选项、data descriptor 与 UTF-8 标志。
+    // 拒绝加密条目（bit 0 / bit 6），仅支持 store（0）与 deflate（8）。
     if (
-      flags & ~0x80e ||
+      flags & 0x41 ||
       (method !== 0 && method !== 8) ||
       compressedSize === 0xffffffff ||
       entrySize === 0xffffffff ||

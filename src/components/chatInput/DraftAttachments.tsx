@@ -9,6 +9,7 @@ import { FileCard } from '../files/FileCard.js'
 import styles from './ChatInput.module.css'
 
 const UPLOADING: UploadTask = { status: 'uploading' }
+const READY_LOCAL: UploadTask = { status: 'done', serverId: '' }
 
 /** 列表只随草稿附件变化更新；每张卡片独立订阅自己的上传状态。 */
 export const DraftAttachments = memo(function DraftAttachments({
@@ -48,7 +49,9 @@ const AttachmentItem = ({
   onRemove: () => void
 }) => {
   const t = useTranslate()
-  const task = useUploads((state) => state.tasks[item.id] ?? UPLOADING)
+  const task = useUploads((state) =>
+    item.localReady ? READY_LOCAL : (state.tasks[item.id] ?? UPLOADING)
+  )
   const status = task.status
   const error = task.status === 'error' ? t(task.error.key, task.error.params) : undefined
   // 过大、格式不支持等重试无效的失败只提示原因，需删除后再发送

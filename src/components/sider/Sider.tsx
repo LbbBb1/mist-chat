@@ -140,18 +140,12 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   )
 }
 
-/** 移动端抽屉：浮在页面上方，点空白区域关闭。 */
+/** 移动端抽屉：位于主内容层下方，主内容左/右滑时丝滑显露 */
 export const MobileSider = () => {
   const open = useMobileSider((state) => state.open)
-  if (!open) {
-    return null
-  }
   return (
-    <>
-      <div className={styles.drawerMask} onClick={closeMobileSider} />
-      <div className={styles.drawer}>
-        <Sider mobile />
-      </div>
-    </>
+    <div className={clsx(styles.drawer, open && styles.drawerOpen)} aria-hidden={!open}>
+      <Sider mobile />
+    </div>
   )
 }

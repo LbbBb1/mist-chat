@@ -97,7 +97,7 @@ export const startRecording = async (onLimit: () => void): Promise<Recording> =>
   }
 }
 
-const encodeWav = (chunks: Float32Array[], length: number) => {
+export const encodeWav = (chunks: Float32Array[], length: number) => {
   const samples = Math.min(length, MAX_SECONDS * SAMPLE_RATE)
   const buffer = new ArrayBuffer(44 + samples * 2)
   const view = new DataView(buffer)
