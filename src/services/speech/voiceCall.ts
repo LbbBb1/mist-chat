@@ -8,7 +8,12 @@ import { getReplyText } from '../chat/reply.js'
 import { sendVoicePrompt, stopReply, useChatStore } from '../chat/store.js'
 import type { AssistantMessage } from '../chat/types.js'
 import { matchesRefusalKeyword, useSettings } from '../settings.js'
-import { describeReadAloudError, scheduleTtsStream, stopReadAloud } from './readAloud.js'
+import {
+  describeReadAloudError,
+  scheduleTtsStream,
+  setReadAloudBlocked,
+  stopReadAloud,
+} from './readAloud.js'
 import { encodeWav, MAX_SECONDS, SAMPLE_RATE } from './recorder.js'
 
 export type VoiceCallPhase =
@@ -574,6 +579,7 @@ export const startVoiceCall = (sessionId: string | null) => {
   if (activeCall) {
     teardownCall(activeCall)
   }
+  setReadAloudBlocked(true)
   stopReadAloud()
 
   const epoch = ++callEpoch
@@ -855,6 +861,7 @@ export const switchVoiceCallCamera = () => {
 }
 
 export const endVoiceCall = () => {
+  setReadAloudBlocked(false)
   const call = activeCall
   if (call) {
     if (call.replySessionId) {

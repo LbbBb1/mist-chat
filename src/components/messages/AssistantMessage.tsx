@@ -2,10 +2,23 @@ import { useTranslate } from '../../i18n/index.js'
 import clsx from 'clsx'
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useIsMobile } from '../../app/viewport.js'
-import { IconEditOutline16, IconRefreshOutline16, IconWarningOutline16 } from '../base/icons.js'
+import {
+  IconBranchOutline16,
+  IconEditOutline16,
+  IconRefreshOutline16,
+  IconTrashOutline16,
+  IconWarningOutline16,
+} from '../base/icons.js'
 import { describeReply } from '../../services/chat/describe.js'
 import { canContinueReply } from '../../services/chat/reply.js'
-import { continueReply, editAssistantMessage, regenerateReply } from '../../services/chat/store.js'
+import {
+  continueReply,
+  deleteMessageBranch,
+  editAssistantMessage,
+  forkSessionFromMessage,
+  regenerateReply,
+} from '../../services/chat/store.js'
+import { showToast } from '../base/toastState.js'
 import { useSettings } from '../../services/settings.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { AssistantMessage as AssistantMessageType } from '../../services/chat/types.js'
@@ -17,6 +30,7 @@ import { SiteThumbnails } from '../search/SiteLogo.js'
 import { toggleSearchPanel, useSearchPanel } from '../search/searchPanelState.js'
 import { ReadAloudButton } from './ReadAloudButton.js'
 import { CopyButton } from './CopyButton.js'
+import { DeleteBranchModal } from './DeleteBranchModal.js'
 import { GeneratedImage } from './GeneratedImage.js'
 import { ReplyArea } from './ReplyArea.js'
 import { useReplyView } from './useReplyView.js'
@@ -83,6 +97,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const summaryEntry = `${message.id}-summary`
 
   const [editing, setEditing] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const canSaveEdit = !busy && draft.trim() !== ''
@@ -133,7 +148,7 @@ export const AssistantMessage = memo(function AssistantMessage({
               }
               if (event.key === 'Escape') {
                 setEditing(false)
-              } else if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !isMobile) {
+              } else if (!isMobile && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault()
                 saveEdit()
               }
@@ -269,6 +284,25 @@ export const AssistantMessage = memo(function AssistantMessage({
                       regenerateReply(sessionId, message.id)
                     }}
                   />
+                  <IconButton
+                    icon={<IconBranchOutline16 />}
+                    tooltip={t('branchChat')}
+                    tooltipPlacement="bottom"
+                    disabled={busy}
+                    onClick={() => {
+                      stopReadAloud()
+                      if (forkSessionFromMessage(sessionId, message.id)) {
+                        showToast({ key: 'branchChatToast' })
+                      }
+                    }}
+                  />
+                  <IconButton
+                    icon={<IconTrashOutline16 />}
+                    tooltip={t('deleteBranch')}
+                    tooltipPlacement="bottom"
+                    disabled={busy}
+                    onClick={() => setConfirmDeleteOpen(true)}
+                  />
                 </div>
                 {isLast && canContinueReply(message, allowRefusedContext) ? (
                   <Button
@@ -294,6 +328,14 @@ export const AssistantMessage = memo(function AssistantMessage({
                   })}
                 </div>
               ) : null}
+              <DeleteBranchModal
+                open={confirmDeleteOpen}
+                onClose={() => setConfirmDeleteOpen(false)}
+                onConfirm={() => {
+                  stopReadAloud()
+                  deleteMessageBranch(sessionId, message.id)
+                }}
+              />
             </>
           )}
         </>

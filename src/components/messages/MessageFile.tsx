@@ -7,6 +7,7 @@ import type { FileAttachment } from '../../services/chat/types.js'
 import { IconPhotoErrorFill20, IconRefreshOutline16 } from '../base/icons.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { FileCard } from '../files/FileCard.js'
+import { openImageViewer } from './imageViewerState.js'
 import styles from './MessageFile.module.css'
 
 /** 原件从 IndexedDB 读出并生成本地地址；undefined 表示加载中，null 表示原件缺失。 */
@@ -134,17 +135,17 @@ export const MessageFile = ({
       )
     }
 
-    // 正常态：链接到原件
+    // 正常态：点击弹出可缩放全屏图片预览（避免 Android WebView 直接跳页无法返回）
     return url ? (
-      <a
+      <button
+        type="button"
         className={clsx(styles.image, styles.imageThumb)}
-        href={url}
-        target="_blank"
-        rel="noreferrer"
         title={file.name}
+        aria-label={file.name}
+        onClick={() => openImageViewer({ src: url, alt: file.name, filename: file.name })}
       >
         {preview}
-      </a>
+      </button>
     ) : (
       // 原件还没加载出来（极短暂）
       <div className={styles.image} />

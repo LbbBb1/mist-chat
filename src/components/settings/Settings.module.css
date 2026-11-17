@@ -742,8 +742,14 @@
 }
 
 .deleteConfirm {
-  max-height: calc(100dvh - 32px);
+  max-height: calc(100vh - 32px);
   overflow-y: auto;
+}
+
+@supports (height: 100dvh) {
+  .deleteConfirm {
+    max-height: calc(100dvh - 32px);
+  }
 }
 
 .deleteActions {

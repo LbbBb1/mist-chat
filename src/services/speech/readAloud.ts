@@ -24,6 +24,15 @@ export const useReadAloud = create<ReadAloudState>(() => ({ messageId: null, sta
 const START_DELAY = 0.1
 
 let current: { controller: AbortController; context: AudioContext } | null = null
+let readAloudBlocked = false
+
+/** 语音通话期间屏蔽并立刻打断自动/手动朗读，避免与通话音频叠音 */
+export const setReadAloudBlocked = (blocked: boolean) => {
+  readAloudBlocked = blocked
+  if (blocked) {
+    stopReadAloud()
+  }
+}
 
 const finish = (controller: AbortController) => {
   if (current?.controller !== controller) {
@@ -180,6 +189,9 @@ export const toggleReadAloud = (
   text: string,
   onError: (error: unknown) => void
 ) => {
+  if (readAloudBlocked) {
+    return
+  }
   const reading = useReadAloud.getState().messageId
   stopReadAloud()
   if (reading === messageId) {

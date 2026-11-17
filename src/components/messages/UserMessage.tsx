@@ -2,8 +2,14 @@ import { useTranslate } from '../../i18n/index.js'
 import clsx from 'clsx'
 import { memo, useLayoutEffect, useRef, useState } from 'react'
 import { useIsMobile } from '../../app/viewport.js'
-import { IconEditOutline16 } from '../base/icons.js'
-import { editMessage, retryUpload } from '../../services/chat/store.js'
+import { IconBranchOutline16, IconEditOutline16, IconTrashOutline16 } from '../base/icons.js'
+import {
+  deleteMessageBranch,
+  editMessage,
+  forkSessionFromMessage,
+  retryUpload,
+} from '../../services/chat/store.js'
+import { showToast } from '../base/toastState.js'
 import { matchesRefusalKeyword } from '../../services/settings.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import type { UserMessage as UserMessageType } from '../../services/chat/types.js'
@@ -17,6 +23,7 @@ import {
 } from './BranchSwitcher.js'
 import { MessageFile } from './MessageFile.js'
 import { CopyButton } from './CopyButton.js'
+import { DeleteBranchModal } from './DeleteBranchModal.js'
 import styles from './UserMessage.module.css'
 
 export const UserMessage = memo(function UserMessage({
@@ -41,6 +48,7 @@ export const UserMessage = memo(function UserMessage({
 }) {
   const t = useTranslate()
   const [editing, setEditing] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [draft, setDraft] = useState(message.content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isMobile = useIsMobile()
@@ -101,7 +109,7 @@ export const UserMessage = memo(function UserMessage({
               }
               if (event.key === 'Escape') {
                 setEditing(false)
-              } else if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !isMobile) {
+              } else if (!isMobile && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault()
                 sendEdit()
               }
@@ -132,9 +140,36 @@ export const UserMessage = memo(function UserMessage({
                   setEditing(true)
                 }}
               />
+              <IconButton
+                icon={<IconBranchOutline16 />}
+                tooltip={t('branchChat')}
+                tooltipPlacement="bottom"
+                disabled={busy}
+                onClick={() => {
+                  stopReadAloud()
+                  if (forkSessionFromMessage(sessionId, message.id)) {
+                    showToast({ key: 'branchChatToast' })
+                  }
+                }}
+              />
+              <IconButton
+                icon={<IconTrashOutline16 />}
+                tooltip={t('deleteBranch')}
+                tooltipPlacement="bottom"
+                disabled={busy}
+                onClick={() => setConfirmDeleteOpen(true)}
+              />
             </div>
             <BranchSwitcher versions={versions} disabled={busy} onSelect={onSelectVersion} />
           </div>
+          <DeleteBranchModal
+            open={confirmDeleteOpen}
+            onClose={() => setConfirmDeleteOpen(false)}
+            onConfirm={() => {
+              stopReadAloud()
+              deleteMessageBranch(sessionId, message.id)
+            }}
+          />
         </>
       )}
     </div>

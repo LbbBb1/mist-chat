@@ -9,6 +9,9 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.widget.Toast;
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.BridgeActivity;
 import java.io.BufferedInputStream;
@@ -58,6 +61,7 @@ public class MainActivity extends BridgeActivity {
     private volatile long updateTotal = 0;
     private volatile String updateError = "";
     private volatile File downloadedApkFile = null;
+    private long lastBackPressAt = 0L;
 
     public class ProxyBridge {
         @JavascriptInterface
@@ -242,6 +246,39 @@ public class MainActivity extends BridgeActivity {
             settings.setMediaPlaybackRequiresUserGesture(false);
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+                if (webView == null) {
+                    handleRootBackPress();
+                    return;
+                }
+                webView.evaluateJavascript(
+                    "(function(){try{return !!(window.__deepchatHandleAndroidBack && window.__deepchatHandleAndroidBack());}catch(e){return false;}})()",
+                    value -> {
+                        if ("true".equals(value)) {
+                            return;
+                        }
+                        if (webView.canGoBack()) {
+                            webView.goBack();
+                            return;
+                        }
+                        handleRootBackPress();
+                    }
+                );
+            }
+        });
+    }
+
+    private void handleRootBackPress() {
+        long now = System.currentTimeMillis();
+        if (now - lastBackPressAt <= 2000L) {
+            finish();
+            return;
+        }
+        lastBackPressAt = now;
+        Toast.makeText(this, "再按一次退出 DeepChat", Toast.LENGTH_SHORT).show();
     }
 
     @Override

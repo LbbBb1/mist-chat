@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { useEffect, useRef, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
+import { registerAndroidBackHandler } from '../../app/androidBack.js'
 import { useTranslate } from '../../i18n/index.js'
 import { useSettings } from '../../services/settings.js'
 import {
@@ -53,6 +54,10 @@ export const VoiceCallOverlay = () => {
     if (!call.active) {
       return
     }
+    const unregisterBack = registerAndroidBackHandler(150, () => {
+      endVoiceCall()
+      return true
+    })
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -63,7 +68,10 @@ export const VoiceCallOverlay = () => {
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    return () => {
+      unregisterBack()
+      window.removeEventListener('keydown', onKeyDown)
+    }
   }, [call.active])
 
   if (!call.active) {

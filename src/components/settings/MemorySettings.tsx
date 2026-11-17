@@ -13,6 +13,7 @@ import {
   setAutoExtractMemory,
   setCrossChatMemory,
   setCrossChatMemoryLimit,
+  setMemoryUpdateNotice,
   setSavedMemoryEnabled,
   useSettings,
 } from '../../services/settings.js'
@@ -59,6 +60,13 @@ export const MemorySettings = () => {
         description={t('memoryAutoExtractDesc')}
         checked={settings.autoExtractMemory}
         onChange={setAutoExtractMemory}
+      />
+
+      <ToggleCell
+        label={t('memoryUpdateNoticeLabel')}
+        description={t('memoryUpdateNoticeDesc')}
+        checked={settings.memoryUpdateNotice}
+        onChange={setMemoryUpdateNotice}
       />
 
       <div className={styles.cell}>

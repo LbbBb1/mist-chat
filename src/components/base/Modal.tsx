@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { registerAndroidBackHandler } from '../../app/androidBack.js'
 import { useTranslate } from '../../i18n/index.js'
 import { IconCloseOutline16 } from './icons.js'
 import { IconButton } from './IconButton.js'
@@ -36,6 +37,13 @@ export const Modal = ({
   useEffect(() => {
     const token = {}
     openModals.push(token)
+    const unregisterBack = registerAndroidBackHandler(100 + openModals.length, () => {
+      if (openModals.at(-1) === token) {
+        onCloseRef.current()
+        return true
+      }
+      return false
+    })
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && openModals.at(-1) === token) {
         onCloseRef.current()
@@ -43,6 +51,7 @@ export const Modal = ({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => {
+      unregisterBack()
       openModals.splice(openModals.indexOf(token), 1)
       document.removeEventListener('keydown', onKeyDown)
     }

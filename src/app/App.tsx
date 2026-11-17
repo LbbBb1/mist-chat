@@ -3,6 +3,7 @@ import { useEffect, useRef, type TouchEvent } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
+import { installAndroidBackBridge, registerAndroidBackHandler } from './androidBack.js'
 import {
   bindChatPersistence,
   initChat,
@@ -22,6 +23,7 @@ import { UpdateModal } from '../components/settings/UpdateModal.js'
 import { syncDailyTokenDate } from '../services/tokenUsage.js'
 import { checkForUpdates } from '../services/updater.js'
 import { VoiceCallOverlay } from '../components/chatInput/VoiceCallOverlay.js'
+import { ImageViewer } from '../components/messages/ImageViewer.js'
 import { Toast } from '../components/base/Toast.js'
 import { showToast } from '../components/base/toastState.js'
 import { onUploadNotice } from '../services/attachments.js'
@@ -178,10 +180,25 @@ export const App = () => {
   // 文件数、存储空间达到上限时，附件上只显示「上传失败」，原因用 toast 说明
   useEffect(() => onUploadNotice(showToast), [])
   useEffect(
-    () => onMemoryUpdated((summary) => showToast({ key: 'memorySavedToast', params: { summary } })),
+    () =>
+      onMemoryUpdated((summary) => {
+        if (useSettings.getState().memoryUpdateNotice) {
+          showToast({ key: 'memorySavedToast', params: { summary } })
+        }
+      }),
     []
   )
   useEffect(bindChatPersistence, [])
+  useEffect(installAndroidBackBridge, [])
+  useEffect(() => {
+    if (!mobileSiderOpen) {
+      return
+    }
+    return registerAndroidBackHandler(50, () => {
+      closeMobileSider()
+      return true
+    })
+  }, [mobileSiderOpen])
 
   // 搜索结果面板只属于当前会话
   useEffect(closeSearchPanel, [activeId])
@@ -279,6 +296,7 @@ export const App = () => {
       <TokenLimitModal />
       <UpdateModal />
       <VoiceCallOverlay />
+      <ImageViewer />
       <Toast />
     </>
   )

@@ -16,8 +16,8 @@ import {
   IconImageGen14,
   IconWarningOutline16,
 } from '../base/icons.js'
-import { Modal } from '../base/Modal.js'
 import { ImageSizePicker } from './ImageSizePicker.js'
+import { openImageViewer } from './imageViewerState.js'
 import styles from './AssistantMessage.module.css'
 
 /**
@@ -45,7 +45,6 @@ export const GeneratedImage = ({
   const defaultSize = useSettings((state) => state.imageGenChannel.size)
   const hasReference = (block.sourceFileIds?.length ?? 0) > 0
   const [url, setUrl] = useState<string | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState(block.prompt ?? '')
   const [sizeDraft, setSizeDraft] = useState(
     block.size || (hasReference ? 'match' : defaultSize || 'auto')
@@ -163,47 +162,36 @@ export const GeneratedImage = ({
   }
 
   return (
-    <>
-      <div className={styles.generatedImageCard}>
-        <img
-          src={url}
-          alt={block.prompt ?? 'Generated image'}
-          className={styles.generatedImage}
-          onClick={() => setPreviewOpen(true)}
-        />
-        <div className={styles.generatedImageFooter}>
-          <span className={styles.generatedImagePrompt}>
-            {block.prompt ? `${t('imageGenPromptLabel')}: ${block.prompt}` : ''}
-          </span>
-          <div className={styles.generatedImageActions}>
-            <IconButton
-              icon={<IconEditOutline16 />}
-              tooltip={t('imageGenReuseButton')}
-              onClick={() =>
-                void reuseGeneratedImageInDraft(sessionId, block.fileId, block.mimeType)
-              }
-            />
-            <IconButton
-              icon={<IconDownloadOutline16 />}
-              tooltip={t('imageGenDownload')}
-              onClick={download}
-            />
-          </div>
+    <div className={styles.generatedImageCard}>
+      <img
+        src={url}
+        alt={block.prompt ?? 'Generated image'}
+        className={styles.generatedImage}
+        onClick={() =>
+          openImageViewer({
+            src: url,
+            alt: block.prompt ?? 'Generated image',
+            filename: `generated-${block.fileId.slice(0, 8)}.${ext}`,
+          })
+        }
+      />
+      <div className={styles.generatedImageFooter}>
+        <span className={styles.generatedImagePrompt}>
+          {block.prompt ? `${t('imageGenPromptLabel')}: ${block.prompt}` : ''}
+        </span>
+        <div className={styles.generatedImageActions}>
+          <IconButton
+            icon={<IconEditOutline16 />}
+            tooltip={t('imageGenReuseButton')}
+            onClick={() => void reuseGeneratedImageInDraft(sessionId, block.fileId, block.mimeType)}
+          />
+          <IconButton
+            icon={<IconDownloadOutline16 />}
+            tooltip={t('imageGenDownload')}
+            onClick={download}
+          />
         </div>
       </div>
-      {previewOpen ? (
-        <Modal
-          title={block.prompt || t('imageGenSwitch')}
-          closable
-          onClose={() => setPreviewOpen(false)}
-        >
-          <img
-            src={url}
-            alt={block.prompt ?? 'Generated image'}
-            className={styles.generatedPreview}
-          />
-        </Modal>
-      ) : null}
-    </>
+    </div>
   )
 }

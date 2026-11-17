@@ -747,3 +747,18 @@ export const IconVolumeOffOutline20 = () => (
     <path d="M2.6 2.8L17.4 17.6" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" />
   </svg>
 )
+
+export const IconBranchOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="4.5" cy="3.5" r="1.75" stroke="currentColor" strokeWidth="1.4" />
+    <circle cx="4.5" cy="12.5" r="1.75" stroke="currentColor" strokeWidth="1.4" />
+    <circle cx="11.5" cy="6" r="1.75" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M4.5 5.25V10.75" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <path
+      d="M4.5 10.5C4.5 8 11.5 9 11.5 7.75"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+  </svg>
+)

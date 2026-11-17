@@ -29,15 +29,36 @@ export const ImageSizePicker = ({
   const normalized = value.trim() || (hasReference ? 'match' : 'auto')
   const isPreset = PRESETS.includes(normalized as (typeof PRESETS)[number])
 
+  const isEn = t('latestReminderLanguage') === 'English'
+  const compactAuto = isEn ? 'Auto' : '自动'
+  const compactMatch = isEn ? 'Match' : '原比例'
+  const compactCustom = isEn ? 'Custom' : '自定义'
+
   const options: SelectOption<string>[] = [
-    ...(hasReference ? [{ value: 'match', label: t('imageGenSizeMatch') }] : []),
-    { value: 'auto', label: t('imageGenSizeAuto') },
-    { value: '1024x1024', label: '1:1 (1024×1024)' },
-    { value: '1024x1536', label: '2:3 (1024×1536)' },
-    { value: '1536x1024', label: '3:2 (1536×1024)' },
-    { value: '1024x1792', label: '9:16 (1024×1792)' },
-    { value: '1792x1024', label: '16:9 (1792×1024)' },
-    { value: CUSTOM_VALUE, label: t('imageGenSizeCustom') },
+    ...(hasReference
+      ? [
+          {
+            value: 'match',
+            label: t('imageGenSizeMatch'),
+            triggerLabel: compact ? compactMatch : undefined,
+          },
+        ]
+      : []),
+    {
+      value: 'auto',
+      label: t('imageGenSizeAuto'),
+      triggerLabel: compact ? compactAuto : undefined,
+    },
+    { value: '1024x1024', label: '1:1 (1024×1024)', triggerLabel: compact ? '1:1' : undefined },
+    { value: '1024x1536', label: '2:3 (1024×1536)', triggerLabel: compact ? '2:3' : undefined },
+    { value: '1536x1024', label: '3:2 (1536×1024)', triggerLabel: compact ? '3:2' : undefined },
+    { value: '1024x1792', label: '9:16 (1024×1792)', triggerLabel: compact ? '9:16' : undefined },
+    { value: '1792x1024', label: '16:9 (1792×1024)', triggerLabel: compact ? '16:9' : undefined },
+    {
+      value: CUSTOM_VALUE,
+      label: t('imageGenSizeCustom'),
+      triggerLabel: compact ? compactCustom : undefined,
+    },
   ]
 
   return (

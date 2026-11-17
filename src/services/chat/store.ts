@@ -16,7 +16,14 @@ import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from 
 import { matchesRefusalKeyword, setImageGen, useSettings } from '../settings.js'
 import { toggleReadAloud } from '../speech/readAloud.js'
 import { recordTurnTokenUsage } from '../tokenUsage.js'
-import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
+import {
+  appendBranch,
+  deleteBranchFrom,
+  forkPathMessages,
+  getVisibleMessages,
+  normalizeSession,
+  selectVersion,
+} from './branches.js'
 import * as db from './db.js'
 import {
   addDraftFiles,
@@ -812,6 +819,66 @@ export const selectMessageVersion = (sessionId: string, messageId: string) => {
   }
   updateSession(sessionId, (session) => selectVersion(session, messageId))
   persist(sessionId)
+}
+
+/** 删除指定消息及其向下衍生的分支；若整个会话已空则顺便删除该空会话。 */
+export const deleteMessageBranch = (sessionId: string, messageId: string): boolean => {
+  if (get().importingHistory || deletingSessions.has(sessionId) || getStreamController(sessionId)) {
+    return false
+  }
+  const current = getSession(sessionId)
+  if (!current) {
+    return false
+  }
+  const next = deleteBranchFrom(current, messageId)
+  if (next === current) {
+    return false
+  }
+  if (next.messages.length === 0) {
+    void removeSession(sessionId)
+    return true
+  }
+  updateSession(sessionId, () => ({
+    ...next,
+    updatedAt: Date.now(),
+  }))
+  persist(sessionId)
+  return true
+}
+
+/** 从指定消息为止的上下文分叉出一个独立新对话，并立即切换过去。 */
+export const forkSessionFromMessage = (sessionId: string, messageId: string): string | null => {
+  if (get().importingHistory || deletingSessions.has(sessionId)) {
+    return null
+  }
+  const source = getSession(sessionId)
+  if (!source) {
+    return null
+  }
+  const forkedMessages = forkPathMessages(source, messageId, createId)
+  if (forkedMessages.length === 0) {
+    return null
+  }
+  const now = Date.now()
+  const baseTitle = source.title.trim()
+  const suffix = translate('branchTitleSuffix')
+  const title = baseTitle ? `${baseTitle} · ${suffix}` : ''
+  const nextSession: Session = {
+    id: createId(),
+    title,
+    createdAt: now,
+    updatedAt: now,
+    rootMessageId: forkedMessages[0].id,
+    messages: forkedMessages,
+  }
+  touchSession(nextSession.id)
+  set((state) => ({
+    sessions: [toSessionSummary(nextSession), ...state.sessions],
+    sessionCache: { ...state.sessionCache, [nextSession.id]: nextSession },
+    activeId: nextSession.id,
+  }))
+  persist(nextSession.id)
+  return nextSession.id
 }
 
 /** 继续最后一条未完成的回答：保留原消息与开关，仅将新流的内容追加到原块之后。 */
@@ -1680,7 +1747,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
                 controller.signal,
                 inlinePrepared.inlineImages,
                 inlinePrepared.inlineTexts,
-                settings.customHeaders
+                settings.customHeaders,
+                settings.thinkingEffort
               )
             : settings.chatProtocol === 'openai' || settings.chatProtocol === 'local'
               ? streamOpenAIMessage(
@@ -1690,7 +1758,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
                   controller.signal,
                   inlinePrepared.inlineImages,
                   inlinePrepared.inlineTexts,
-                  settings.customHeaders
+                  settings.customHeaders,
+                  settings.thinkingEffort
                 )
               : streamMessage(settings.apiKey ?? '', requestBody, controller.signal)
         const blockIndexes = new Map<number, number>()

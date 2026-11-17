@@ -6,8 +6,11 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react'
+import { createPortal } from 'react-dom'
+import { registerAndroidBackHandler } from '../../app/androidBack.js'
 import {
   IconAttachmentOutline22,
   IconCameraOutline22,
@@ -26,7 +29,9 @@ import {
   setImageGenChannel,
   setSearch,
   setThinking,
+  setThinkingEffort,
   useSettings,
+  type ThinkingEffort,
 } from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
@@ -43,6 +48,7 @@ import {
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import { startVoiceCall } from '../../services/speech/voiceCall.js'
 import { Tooltip } from '../base/Tooltip.js'
+import { useAnchoredPosition, useDismiss } from '../base/anchored.js'
 import { ensureApiKey, openSettings } from '../settings/settingsDialogState.js'
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
@@ -50,7 +56,6 @@ import { ACCEPT, useUploads } from '../../services/attachments.js'
 import { DraftAttachments } from './DraftAttachments.js'
 import { ImageSizePicker } from '../messages/ImageSizePicker.js'
 import { useVoiceInput } from './useVoiceInput.js'
-import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
 import { useTranslate } from '../../i18n/index.js'
 import styles from './ChatInput.module.css'
@@ -71,6 +76,8 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     (state) => sessionId !== null && Object.hasOwn(state.streaming, sessionId)
   )
   const thinking = useSettings((state) => state.thinking)
+  const thinkingEffort = useSettings((state) => state.thinkingEffort)
+  const chatProtocol = useSettings((state) => state.chatProtocol)
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
@@ -79,11 +86,55 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const imageGenReady = imageGenChannel.enabled && Boolean(imageGenChannel.model.trim())
   const hasImageAttachment = attachments.some((item) => item.isImage)
   const [plusOpen, setPlusOpen] = useState(false)
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false)
+  const [holdCancelling, setHoldCancelling] = useState(false)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
+  const thinkLongPressTimerRef = useRef<number | null>(null)
+  const thinkLongPressTriggeredRef = useRef(false)
+  const holdCancellingRef = useRef(false)
+  const voiceHoldActiveRef = useRef(false)
+
+  const effortOptions: ThinkingEffort[] =
+    chatProtocol === 'deepseek' ? ['low', 'high', 'max'] : ['low', 'high', 'max', 'xhigh']
+  const activeEffort: ThinkingEffort =
+    chatProtocol === 'deepseek' && thinkingEffort === 'xhigh' ? 'max' : thinkingEffort
+
+  const {
+    anchorRef: thinkAnchorRef,
+    floatingRef: effortMenuRef,
+    position: effortMenuPosition,
+  } = useAnchoredPosition<HTMLButtonElement, HTMLDivElement>(effortMenuOpen, {
+    side: 'top',
+    align: 'start',
+    offset: 8,
+  })
+  useDismiss(effortMenuOpen, [thinkAnchorRef, effortMenuRef], () => setEffortMenuOpen(false), {
+    captureEscape: true,
+  })
+
+  useEffect(() => {
+    if (!effortMenuOpen) {
+      return
+    }
+    return registerAndroidBackHandler(45, () => {
+      setEffortMenuOpen(false)
+      return true
+    })
+  }, [effortMenuOpen])
+
+  useEffect(() => {
+    if (!plusOpen) {
+      return
+    }
+    return registerAndroidBackHandler(40, () => {
+      setPlusOpen(false)
+      return true
+    })
+  }, [plusOpen])
 
   const openPicker = (ref: RefObject<HTMLInputElement>) => {
     const {
@@ -115,7 +166,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     const observer = new ResizeObserver(updateLabels)
     observer.observe(toggles)
     return () => observer.disconnect()
-  }, [t])
+  }, [t, thinking, activeEffort, imageGen])
 
   const acceptFiles = (files: File[]) => {
     if (files.length === 0 || useChatStore.getState().importingHistory) {
@@ -220,10 +271,103 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     }
   }
 
+  // 长按输入框语音输入：按住 340ms 开启录音 + 波形动画，上滑取消，松开识别
+  const startVoiceHold = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (
+      event.button !== 0 ||
+      !voice.available ||
+      voice.status !== 'idle' ||
+      useChatStore.getState().importingHistory ||
+      streaming
+    ) {
+      return
+    }
+    const startX = event.clientX
+    const startY = event.clientY
+    let activated = false
+    holdCancellingRef.current = false
+    setHoldCancelling(false)
+
+    const clearListeners = () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+    }
+
+    const timer = window.setTimeout(() => {
+      if (useChatStore.getState().importingHistory || !ensureApiKey()) {
+        clearListeners()
+        return
+      }
+      activated = true
+      voiceHoldActiveRef.current = true
+      textareaRef.current?.blur()
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(18)
+      }
+      void voice.start()
+    }, 340)
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== event.pointerId) {
+        return
+      }
+      if (!activated) {
+        if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 10) {
+          window.clearTimeout(timer)
+          clearListeners()
+        }
+        return
+      }
+      const nextCancel = moveEvent.clientY - startY < -52
+      if (nextCancel !== holdCancellingRef.current) {
+        holdCancellingRef.current = nextCancel
+        setHoldCancelling(nextCancel)
+      }
+    }
+
+    const finishHold = (shouldCancel: boolean) => {
+      window.clearTimeout(timer)
+      clearListeners()
+      if (!activated) {
+        return
+      }
+      voiceHoldActiveRef.current = false
+      const cancelVoiceInput = shouldCancel || holdCancellingRef.current
+      holdCancellingRef.current = false
+      setHoldCancelling(false)
+      if (cancelVoiceInput) {
+        voice.cancel()
+      } else {
+        void voice.finish()
+      }
+    }
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId === event.pointerId) {
+        finishHold(false)
+      }
+    }
+
+    const onPointerCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId === event.pointerId) {
+        finishHold(true)
+      }
+    }
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
+  }
+
   return (
     <div className={styles.inputHost}>
       <div
-        className={clsx(styles.wrapper, sessionId === null ? styles.home : styles.session)}
+        className={clsx(
+          styles.wrapper,
+          sessionId === null ? styles.home : styles.session,
+          recording && (holdCancelling ? styles.voiceCancel : styles.voiceActive)
+        )}
         onClick={(event) => {
           if (event.target === event.currentTarget) {
             textareaRef.current?.focus({ preventScroll: true })
@@ -231,11 +375,26 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         }}
       >
         <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
-        <div className={styles.textareaWrapper}>
+        <div
+          className={styles.textareaWrapper}
+          onPointerDown={startVoiceHold}
+          onContextMenu={(event) => {
+            if (voiceHoldActiveRef.current || recording) {
+              event.preventDefault()
+            }
+          }}
+        >
           <textarea
             ref={textareaRef}
-            className={clsx(styles.textarea, recording && isMobile && styles.textareaHidden)}
-            placeholder={t('chatInputPlaceholderChat')}
+            className={clsx(
+              styles.textarea,
+              (recording || voice.status === 'transcribing') && styles.textareaHidden
+            )}
+            placeholder={
+              voice.available
+                ? `${t('chatInputPlaceholderChat')} · ${t('voiceHoldHint')}`
+                : t('chatInputPlaceholderChat')
+            }
             rows={2}
             // 移动端不自动聚焦，避免一打开就弹出键盘
             autoFocus={!isMobile}
@@ -254,7 +413,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               }
             }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              if (
+                !isMobile &&
+                event.key === 'Enter' &&
+                (event.ctrlKey || event.metaKey) &&
+                !event.nativeEvent.isComposing
+              ) {
                 event.preventDefault()
                 send()
               }
@@ -267,26 +431,122 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               }
             }}
           />
-          {recording && isMobile ? <Spectrum getAnalyser={voice.getAnalyser} /> : null}
+          {recording ? (
+            <div
+              className={clsx(styles.voiceHoldStage, holdCancelling && styles.voiceHoldStageCancel)}
+            >
+              <div className={styles.voiceHoldHeader}>
+                <span className={styles.voiceHoldDot} />
+                <span className={styles.voiceHoldTimer}>{voice.seconds}s</span>
+                <span>{holdCancelling ? t('voiceHoldCancelHint') : t('voiceHoldRecording')}</span>
+              </div>
+              <Spectrum getAnalyser={voice.getAnalyser} />
+            </div>
+          ) : null}
+          {voice.status === 'transcribing' ? (
+            <button
+              type="button"
+              className={styles.voiceTranscribingBar}
+              onClick={() => voice.cancel()}
+            >
+              <span>{t('voiceHoldTranscribing')}</span>
+            </button>
+          ) : null}
           <div className={styles.mirror} aria-hidden>
             {`${text}\n`}
           </div>
         </div>
         <div className={styles.functionRow}>
-          {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
+          {/* 深度思考 / 智能搜索开关，长按深度思考可选思考强度 */}
           <div ref={togglesRef} className={styles.toggles}>
             <Tooltip content={t('deactivatedThinkTooltip')}>
               <button
+                ref={thinkAnchorRef}
                 type="button"
                 className={clsx(styles.toggle, thinking && styles.selected)}
                 aria-label={t('thinkingSwitch')}
                 aria-pressed={thinking}
-                onClick={() => setThinking(!thinking)}
+                onPointerDown={() => {
+                  thinkLongPressTriggeredRef.current = false
+                  if (thinkLongPressTimerRef.current !== null) {
+                    window.clearTimeout(thinkLongPressTimerRef.current)
+                  }
+                  thinkLongPressTimerRef.current = window.setTimeout(() => {
+                    thinkLongPressTriggeredRef.current = true
+                    setEffortMenuOpen(true)
+                  }, 420)
+                }}
+                onPointerUp={() => {
+                  if (thinkLongPressTimerRef.current !== null) {
+                    window.clearTimeout(thinkLongPressTimerRef.current)
+                    thinkLongPressTimerRef.current = null
+                  }
+                }}
+                onPointerLeave={() => {
+                  if (thinkLongPressTimerRef.current !== null) {
+                    window.clearTimeout(thinkLongPressTimerRef.current)
+                    thinkLongPressTimerRef.current = null
+                  }
+                }}
+                onPointerCancel={() => {
+                  if (thinkLongPressTimerRef.current !== null) {
+                    window.clearTimeout(thinkLongPressTimerRef.current)
+                    thinkLongPressTimerRef.current = null
+                  }
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  thinkLongPressTriggeredRef.current = true
+                  setEffortMenuOpen(true)
+                }}
+                onClick={() => {
+                  if (thinkLongPressTriggeredRef.current) {
+                    thinkLongPressTriggeredRef.current = false
+                    return
+                  }
+                  setThinking(!thinking)
+                }}
               >
                 <IconThinkOutline14 />
                 <span className={styles.toggleLabel}>{t('thinkingSwitch')}</span>
+                {thinking ? <span className={styles.effortBadge}>{activeEffort}</span> : null}
               </button>
             </Tooltip>
+            {effortMenuOpen
+              ? createPortal(
+                  <div
+                    ref={effortMenuRef}
+                    className={styles.effortMenu}
+                    style={effortMenuPosition ?? undefined}
+                    role="menu"
+                    aria-label={t('thinkingEffortTitle')}
+                  >
+                    <div className={styles.effortMenuTitle}>{t('thinkingEffortTitle')}</div>
+                    <div className={styles.effortPills}>
+                      {effortOptions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={activeEffort === option}
+                          className={clsx(
+                            styles.effortPill,
+                            activeEffort === option && styles.effortPillActive
+                          )}
+                          onClick={() => {
+                            setThinkingEffort(option)
+                            setThinking(true)
+                            setEffortMenuOpen(false)
+                          }}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>,
+                  document.body
+                )
+              : null}
             <Tooltip content={t('deactivatedSearchTooltip')}>
               <button
                 type="button"
@@ -328,19 +588,6 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             ) : null}
           </div>
           <div className={styles.right}>
-            <VoiceButton
-              status={voice.status}
-              disabled={!voice.available}
-              seconds={voice.seconds}
-              onClick={() => {
-                if (
-                  voice.status !== 'idle' ||
-                  (!useChatStore.getState().importingHistory && ensureApiKey())
-                ) {
-                  void voice.toggle()
-                }
-              }}
-            />
             <Tooltip content={t('chatInputMoreActions')}>
               <button
                 type="button"

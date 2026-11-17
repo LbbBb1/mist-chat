@@ -68,11 +68,14 @@ export const useMobileViewport = (enabled: boolean) => {
         reset()
         return
       }
-      frame.style.setProperty(
-        '--app-viewport-height',
-        `${viewport?.height ?? window.innerHeight}px`
-      )
-      frame.style.setProperty('--app-viewport-top', `${viewport?.offsetTop ?? 0}px`)
+      const rawHeight = viewport?.height ?? window.innerHeight
+      // 防止部分安卓 WebView 收键盘瞬间返回 0 或过小高度导致主画面塌陷
+      if (!Number.isFinite(rawHeight) || rawHeight < 160) {
+        reset()
+        return
+      }
+      frame.style.setProperty('--app-viewport-height', `${rawHeight}px`)
+      frame.style.setProperty('--app-viewport-top', `${Math.max(0, viewport?.offsetTop ?? 0)}px`)
     }
     const scheduleFrame = () => {
       cancelAnimationFrame(animationFrame)

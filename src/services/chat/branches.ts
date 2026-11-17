@@ -115,3 +115,87 @@ export const selectVersion = (original: Session, messageId: string): Session => 
     ),
   }
 }
+
+/** 删除指定消息及其向下衍生的整棵分支子树；若有同父兄弟版本则切换到相邻版本，否则上层节点截止于此。 */
+export const deleteBranchFrom = (original: Session, messageId: string): Session => {
+  const session = normalizeSession(original)
+  const target = session.messages.find((item) => item.id === messageId)
+  if (!target) {
+    return original
+  }
+
+  const removed = new Set<string>([messageId])
+  let added = true
+  while (added) {
+    added = false
+    for (const item of session.messages) {
+      if (!removed.has(item.id) && item.parentId && removed.has(item.parentId)) {
+        removed.add(item.id)
+        added = true
+      }
+    }
+  }
+
+  const parentId = target.parentId ?? null
+  const siblings = session.messages.filter((item) => (item.parentId ?? null) === parentId)
+  const targetIndex = siblings.findIndex((item) => item.id === messageId)
+  const nextSibling = siblings[targetIndex - 1] ?? siblings[targetIndex + 1] ?? undefined
+
+  const remaining = session.messages
+    .filter((item) => !removed.has(item.id))
+    .map((item) => {
+      if (parentId !== null && item.id === parentId && item.selectedChildId === messageId) {
+        return { ...item, selectedChildId: nextSibling?.id }
+      }
+      return item
+    })
+
+  const rootMessageId =
+    parentId === null
+      ? session.rootMessageId === messageId
+        ? (nextSibling?.id ?? null)
+        : (session.rootMessageId ?? null)
+      : (session.rootMessageId ?? null)
+
+  return {
+    ...session,
+    rootMessageId,
+    messages: remaining,
+  }
+}
+
+/** 收集从根节点到目标消息为止的直线上下文，并重建为干净的单分支消息列表。 */
+export const forkPathMessages = (
+  original: Session,
+  messageId: string,
+  createNewId: () => string
+): Message[] => {
+  const session = normalizeSession(original)
+  const byId = new Map(session.messages.map((item) => [item.id, item]))
+  const reversed: Message[] = []
+  const visited = new Set<string>()
+  let cursor: string | null | undefined = messageId
+  while (cursor) {
+    if (visited.has(cursor)) {
+      break
+    }
+    visited.add(cursor)
+    const item = byId.get(cursor)
+    if (!item) {
+      break
+    }
+    reversed.push(item)
+    cursor = item.parentId ?? null
+  }
+  const chain = reversed.reverse()
+  if (chain.length === 0) {
+    return []
+  }
+  const newIds = chain.map(() => createNewId())
+  return chain.map((item, index) => ({
+    ...item,
+    id: newIds[index],
+    parentId: index === 0 ? null : newIds[index - 1],
+    selectedChildId: index < chain.length - 1 ? newIds[index + 1] : undefined,
+  }))
+}

@@ -10,6 +10,7 @@ export type ThemePreference = 'light' | 'dark' | 'system'
 
 /** 主语言模型接口协议：deepseek / openai / responses / local（本地部署免密钥） */
 export type ChatProtocol = 'deepseek' | 'openai' | 'responses' | 'local'
+export type ThinkingEffort = 'low' | 'high' | 'max' | 'xhigh'
 
 export type ImageGenProtocol = 'auto' | 'images' | 'responses'
 
@@ -80,6 +81,7 @@ export type Settings = {
   tokenLimitEnabled: boolean
   dailyTokenLimit: number
   thinking: boolean
+  thinkingEffort: ThinkingEffort
   search: boolean
   imageGen: boolean
   siderCollapsed: boolean
@@ -110,6 +112,7 @@ export type Settings = {
   allowEditAssistant: boolean
   savedMemoryEnabled: boolean
   autoExtractMemory: boolean
+  memoryUpdateNotice: boolean
   crossChatMemory: boolean
   crossChatMemoryLimit: number
   // 自定义关键词拒答（仅检查用户输入）
@@ -130,6 +133,7 @@ const KEYS = {
   tokenLimitEnabled: 'chat-demo:token-limit-enabled',
   dailyTokenLimit: 'chat-demo:daily-token-limit',
   thinking: 'chat-demo:thinking',
+  thinkingEffort: 'chat-demo:thinking-effort',
   search: 'chat-demo:search',
   imageGen: 'chat-demo:image-gen',
   siderCollapsed: 'chat-demo:sider-collapsed',
@@ -156,6 +160,7 @@ const KEYS = {
   allowEditAssistant: 'chat-demo:allow-edit-assistant',
   savedMemoryEnabled: 'chat-demo:saved-memory-enabled',
   autoExtractMemory: 'chat-demo:auto-extract-memory',
+  memoryUpdateNotice: 'chat-demo:memory-update-notice',
   crossChatMemory: 'chat-demo:cross-chat-memory',
   crossChatMemoryLimit: 'chat-demo:cross-chat-memory-limit',
   refusalEnabled: 'chat-demo:refusal-enabled',
@@ -297,6 +302,11 @@ const readImageGenChannel = (key: string): ImageGenChannelConfig => {
   }
 }
 
+const initialThinkingEffort = (): ThinkingEffort => {
+  const value = read(KEYS.thinkingEffort)
+  return value === 'low' || value === 'high' || value === 'max' || value === 'xhigh' ? value : 'low'
+}
+
 const initialChatProtocol = (): ChatProtocol => {
   const saved = read(KEYS.chatProtocol)
   if (saved === 'openai' || saved === 'responses' || saved === 'local') {
@@ -319,6 +329,7 @@ export const useSettings = create<Settings>(() => ({
   tokenLimitEnabled: readBool(KEYS.tokenLimitEnabled, false),
   dailyTokenLimit: Math.max(1000, Math.round(readNumber(KEYS.dailyTokenLimit) ?? 100_000)),
   thinking: read(KEYS.thinking) === 'true',
+  thinkingEffort: initialThinkingEffort(),
   search: read(KEYS.search) === 'true',
   imageGen: read(KEYS.imageGen) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
@@ -345,6 +356,7 @@ export const useSettings = create<Settings>(() => ({
   allowEditAssistant: readBool(KEYS.allowEditAssistant, true),
   savedMemoryEnabled: readBool(KEYS.savedMemoryEnabled, true),
   autoExtractMemory: readBool(KEYS.autoExtractMemory, true),
+  memoryUpdateNotice: readBool(KEYS.memoryUpdateNotice, false),
   crossChatMemory: readBool(KEYS.crossChatMemory, true),
   crossChatMemoryLimit: Math.min(10, Math.max(1, readNumber(KEYS.crossChatMemoryLimit) ?? 4)),
   refusalEnabled: readBool(KEYS.refusalEnabled, false),
@@ -397,6 +409,11 @@ export const setApiKey = (apiKey: string | null) => {
 export const setThinking = (thinking: boolean) => {
   write(KEYS.thinking, String(thinking))
   useSettings.setState({ thinking })
+}
+
+export const setThinkingEffort = (thinkingEffort: ThinkingEffort) => {
+  write(KEYS.thinkingEffort, thinkingEffort)
+  useSettings.setState({ thinkingEffort })
 }
 
 export const setSearch = (search: boolean) => {
@@ -519,6 +536,9 @@ export const setSavedMemoryEnabled = (value: boolean) =>
 export const setAutoExtractMemory = (value: boolean) =>
   setBoolSetting(KEYS.autoExtractMemory, 'autoExtractMemory', value)
 
+export const setMemoryUpdateNotice = (value: boolean) =>
+  setBoolSetting(KEYS.memoryUpdateNotice, 'memoryUpdateNotice', value)
+
 export const setCrossChatMemory = (value: boolean) =>
   setBoolSetting(KEYS.crossChatMemory, 'crossChatMemory', value)
 
@@ -569,6 +589,8 @@ export const resetModelAndPolicySettings = () => {
   setAllowEditAssistant(true)
   setSavedMemoryEnabled(true)
   setAutoExtractMemory(true)
+  setMemoryUpdateNotice(false)
+  setThinkingEffort('low')
   setCrossChatMemory(true)
   setCrossChatMemoryLimit(4)
   setRefusalEnabled(false)

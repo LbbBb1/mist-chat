@@ -197,6 +197,10 @@ const mapFinishReason = (reason: unknown): 'end_turn' | 'max_tokens' | 'refusal'
 /**
  * 调用 OpenAI 兼容 /v1/chat/completions 流式接口，并转换为统一 MessageStreamEvent。
  */
+export type ReasoningEffort = 'low' | 'high' | 'max' | 'xhigh'
+
+const mapReasoningEffort = (effort?: ReasoningEffort) => (effort === 'max' ? 'high' : effort)
+
 export async function* streamOpenAIMessage(
   baseUrl: string,
   apiKey: string,
@@ -204,14 +208,17 @@ export async function* streamOpenAIMessage(
   signal: AbortSignal,
   inlineImages: ReadonlyMap<string, string> = new Map(),
   inlineTexts: ReadonlyMap<string, string> = new Map(),
-  customHeadersRaw = ''
+  customHeadersRaw = '',
+  thinkingEffort?: ReasoningEffort
 ): AsyncGenerator<MessageStreamEvent> {
   const url = joinApiPath(baseUrl, '/chat/completions')
+  const effort = mapReasoningEffort(thinkingEffort)
   const payload: Record<string, unknown> = {
     model: body.model,
     messages: toOpenAIMessages(body, inlineImages, inlineTexts),
     stream: true,
     stream_options: { include_usage: true },
+    ...(body.thinking.type === 'enabled' && effort ? { reasoning_effort: effort } : {}),
     ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
     ...(body.top_p !== undefined ? { top_p: body.top_p } : {}),
     ...(body.max_tokens !== undefined ? { max_tokens: body.max_tokens } : {}),
@@ -362,15 +369,18 @@ export async function* streamResponsesMessage(
   signal: AbortSignal,
   inlineImages: ReadonlyMap<string, string> = new Map(),
   inlineTexts: ReadonlyMap<string, string> = new Map(),
-  customHeadersRaw = ''
+  customHeadersRaw = '',
+  thinkingEffort?: ReasoningEffort
 ): AsyncGenerator<MessageStreamEvent> {
   const url = joinApiPath(baseUrl, '/responses')
+  const effort = mapReasoningEffort(thinkingEffort)
   const payload: Record<string, unknown> = {
     model: body.model,
     ...(body.system?.trim() ? { instructions: body.system.trim() } : {}),
     input: toResponsesInput(body, inlineImages, inlineTexts),
     stream: true,
     store: false,
+    ...(body.thinking.type === 'enabled' && effort ? { reasoning: { effort } } : {}),
     ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
     ...(body.top_p !== undefined ? { top_p: body.top_p } : {}),
     ...(body.max_tokens !== undefined ? { max_output_tokens: body.max_tokens } : {}),
