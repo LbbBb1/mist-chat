@@ -15,6 +15,7 @@ import {
   IconThinkOutline16,
 } from '../base/icons.js'
 import type { AssistantMessage } from '../../services/chat/types.js'
+import { useSettings } from '../../services/settings.js'
 import {
   getAreaTitle,
   isDeepSearchKind,
@@ -65,7 +66,11 @@ export const ReplyArea = memo(function ReplyArea({
   hasResponse: boolean
 }) {
   useTranslate()
-  const [open, setOpen] = useState(true)
+  const collapseThinking = useSettings((state) => state.collapseThinking)
+  const [open, setOpen] = useState(() => !collapseThinking)
+  useEffect(() => {
+    setOpen(!collapseThinking)
+  }, [collapseThinking])
   const titleActive = streaming && !hasResponse
   useTicker(titleActive, 1000)
   if (view.steps.length === 0 && !(message.thinking && streaming)) {

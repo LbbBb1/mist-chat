@@ -11,6 +11,8 @@ import { createPortal } from 'react-dom'
 import { registerAndroidBackHandler } from '../../app/androidBack.js'
 import { useTranslate } from '../../i18n/index.js'
 import { IconCloseOutline16, IconDownloadOutline16 } from '../base/icons.js'
+import { showToast } from '../base/toastState.js'
+import { saveDownloadedUrl } from '../../utils/download.js'
 import { closeImageViewer, useImageViewer } from './imageViewerState.js'
 import styles from './ImageViewer.module.css'
 
@@ -184,10 +186,15 @@ export const ImageViewer = () => {
   }
 
   const downloadImage = () => {
-    const anchor = document.createElement('a')
-    anchor.href = current.src
-    anchor.download = current.filename || 'image.png'
-    anchor.click()
+    void saveDownloadedUrl(current.src, current.filename || 'image.png')
+      .then((dest) => {
+        if (dest === 'browser') {
+          showToast({ key: 'imageSavedToast' })
+        }
+      })
+      .catch(() => {
+        showToast({ key: 'imageSaveFailedToast' })
+      })
   }
 
   return createPortal(

@@ -116,6 +116,130 @@ const next = () => {
   }
 }
 
+/** 识别图片前 16 字节魔数，避免归档导入或重命名导致 MIME 缺失或失真。 */
+const detectImageMimeFromBytes = (bytes: Uint8Array): string => {
+  const startsWith = (...prefix: number[]) => prefix.every((byte, index) => bytes[index] === byte)
+  const header = new TextDecoder('ascii').decode(bytes.subarray(0, 12))
+  if (startsWith(0xff, 0xd8, 0xff)) {
+    return 'image/jpeg'
+  }
+  if (startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) {
+    return 'image/png'
+  }
+  if (header.startsWith('GIF87a') || header.startsWith('GIF89a')) {
+    return 'image/gif'
+  }
+  if (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP') {
+    return 'image/webp'
+  }
+  if (startsWith(0x42, 0x4d)) {
+    return 'image/bmp'
+  }
+  if (startsWith(0x49, 0x49, 0x2a, 0) || startsWith(0x4d, 0x4d, 0, 0x2a)) {
+    return 'image/tiff'
+  }
+  if (
+    header.slice(4, 8) === 'ftyp' &&
+    ['avif', 'avis', 'heic', 'heif'].includes(header.slice(8, 12))
+  ) {
+    return 'image/avif'
+  }
+  return ''
+}
+
+const MAX_NORMALIZED_IMAGE_EDGE = 2048
+
+const decodeAndConvertImage = async (blob: Blob, targetMime: 'image/jpeg' | 'image/png') => {
+  let width = 0
+  let height = 0
+  let drawSource: CanvasImageSource
+  let cleanup: (() => void) | null = null
+
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob)
+    width = bitmap.width
+    height = bitmap.height
+    drawSource = bitmap
+    cleanup = () => bitmap.close()
+  } else {
+    const objectUrl = URL.createObjectURL(blob)
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image()
+        element.onload = () => resolve(element)
+        element.onerror = () => reject(new Error('Invalid image'))
+        element.src = objectUrl
+      })
+      width = img.naturalWidth || img.width
+      height = img.naturalHeight || img.height
+      drawSource = img
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }
+
+  try {
+    if (width <= 0 || height <= 0) {
+      throw new Error('Empty image dimensions')
+    }
+    const scale = Math.min(1, MAX_NORMALIZED_IMAGE_EDGE / Math.max(width, height))
+    const targetW = Math.max(1, Math.round(width * scale))
+    const targetH = Math.max(1, Math.round(height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = targetW
+    canvas.height = targetH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      throw new Error('Canvas unavailable')
+    }
+    if (targetMime === 'image/jpeg') {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, targetW, targetH)
+    }
+    ctx.drawImage(drawSource, 0, 0, targetW, targetH)
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (converted) => {
+          if (converted && converted.size > 0) {
+            resolve(converted)
+          } else {
+            reject(new Error('Image transcode failed'))
+          }
+        },
+        targetMime,
+        targetMime === 'image/jpeg' ? 0.9 : undefined
+      )
+    })
+  } finally {
+    cleanup?.()
+  }
+}
+
+/**
+ * 上传前规范化图片：
+ * - PNG / JPEG 原样保留并补正真实 MIME；
+ * - WebP / BMP / TIFF / AVIF / GIF 或空 MIME 的历史图片自动转为标准 JPEG/PNG，防止模型接口报错。
+ */
+const normalizeImageForUpload = async (
+  blob: Blob,
+  name: string
+): Promise<{ blob: Blob; name: string }> => {
+  if (blob.size === 0) {
+    throw new Error('Empty image file')
+  }
+  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer())
+  const detected = detectImageMimeFromBytes(head)
+  if ((detected === 'image/jpeg' || detected === 'image/png') && blob.size <= 16 * 1024 * 1024) {
+    const fixedBlob = blob.type === detected ? blob : new Blob([blob], { type: detected })
+    return { blob: fixedBlob, name }
+  }
+  const targetMime = detected === 'image/png' ? 'image/png' : 'image/jpeg'
+  const converted = await decodeAndConvertImage(blob, targetMime)
+  const baseName = name.replace(/\.[^.]+$/, '') || 'image'
+  const ext = targetMime === 'image/png' ? 'png' : 'jpg'
+  return { blob: converted, name: `${baseName}.${ext}` }
+}
+
 /** 排队上传，最多同时上传 MAX_CONCURRENT 个；排队期间中止的任务不会发出请求 */
 const enqueueUpload = (
   apiKey: string,
@@ -131,8 +255,14 @@ const enqueueUpload = (
         return
       }
       try {
-        const body = file instanceof File ? file : new File([file], name, { type: file.type })
-        resolve((await uploadFile(apiKey, body, getUploadPurpose(name, isImage), signal)).id)
+        const prepared = isImage ? await normalizeImageForUpload(file, name) : { blob: file, name }
+        const body =
+          prepared.blob instanceof File
+            ? prepared.blob
+            : new File([prepared.blob], prepared.name, { type: prepared.blob.type })
+        resolve(
+          (await uploadFile(apiKey, body, getUploadPurpose(prepared.name, isImage), signal)).id
+        )
       } catch (error) {
         reject(error)
       }

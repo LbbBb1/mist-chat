@@ -68,7 +68,7 @@ export const parseCustomHeaders = (raw: string): Record<string, string> => {
   return result
 }
 
-const getAndroidProxyOrigin = (): string | null => {
+export const getAndroidProxyOrigin = (): string | null => {
   if (typeof window === 'undefined') {
     return null
   }

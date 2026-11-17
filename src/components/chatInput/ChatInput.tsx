@@ -96,7 +96,11 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const thinkLongPressTimerRef = useRef<number | null>(null)
   const thinkLongPressTriggeredRef = useRef(false)
   const holdCancellingRef = useRef(false)
+  const voiceHoldPendingRef = useRef(false)
   const voiceHoldActiveRef = useRef(false)
+  const pendingVoiceAutoSendRef = useRef(false)
+  const sendLatestRef = useRef<() => void>(() => {})
+  const textareaWrapperRef = useRef<HTMLDivElement>(null)
 
   const effortOptions: ThinkingEffort[] =
     chatProtocol === 'deepseek' ? ['low', 'high', 'max'] : ['low', 'high', 'max', 'xhigh']
@@ -207,18 +211,31 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   )
   const dragging = useFileDrop(acceptFiles)
 
-  /** 转写结果插入到光标处，并把光标移到插入内容之后 */
+  /** 转写结果插入到光标处；开启语音自动发送时松开识别完直接发送 */
   const voice = useVoiceInput((transcript) => {
     const textarea = textareaRef.current
     const current = getDraft(sessionId).text
     const start = textarea?.selectionStart ?? current.length
     const end = textarea?.selectionEnd ?? current.length
-    setText(current.slice(0, start) + transcript + current.slice(end))
+    const nextText = current.slice(0, start) + transcript + current.slice(end)
+    setText(nextText)
+    if (useSettings.getState().voiceAutoSend && nextText.trim()) {
+      pendingVoiceAutoSendRef.current = true
+      return
+    }
     requestAnimationFrame(() => {
       textarea?.focus({ preventScroll: true })
       textarea?.setSelectionRange(start + transcript.length, start + transcript.length)
     })
   })
+
+  useEffect(() => {
+    if (!pendingVoiceAutoSendRef.current || voice.status !== 'idle') {
+      return
+    }
+    pendingVoiceAutoSendRef.current = false
+    sendLatestRef.current()
+  }, [voice.status, text, attachments])
 
   // 欢迎页导入后会话 ID 不变，不能依赖卸载取消语音；订阅开始事件也覆盖快速完成的导入。
   const cancelVoice = voice.cancel
@@ -270,6 +287,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       textareaRef.current?.focus()
     }
   }
+  sendLatestRef.current = send
 
   // 长按输入框语音输入：按住 340ms 开启录音 + 波形动画，上滑取消，松开识别
   const startVoiceHold = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -282,16 +300,34 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     ) {
       return
     }
+    const wrapperEl = event.currentTarget
+    const pointerId = event.pointerId
     const startX = event.clientX
     const startY = event.clientY
     let activated = false
+    voiceHoldPendingRef.current = true
     holdCancellingRef.current = false
     setHoldCancelling(false)
 
+    const preventNativeScroll = (touchEvent: TouchEvent) => {
+      if (activated) {
+        touchEvent.preventDefault()
+      }
+    }
+
     const clearListeners = () => {
+      voiceHoldPendingRef.current = false
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerCancel)
+      document.removeEventListener('touchmove', preventNativeScroll)
+      try {
+        if (wrapperEl.hasPointerCapture?.(pointerId)) {
+          wrapperEl.releasePointerCapture(pointerId)
+        }
+      } catch {
+        // ignore release errors
+      }
     }
 
     const timer = window.setTimeout(() => {
@@ -301,6 +337,11 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       }
       activated = true
       voiceHoldActiveRef.current = true
+      try {
+        wrapperEl.setPointerCapture?.(pointerId)
+      } catch {
+        // ignore capture errors
+      }
       textareaRef.current?.blur()
       if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         navigator.vibrate(18)
@@ -309,11 +350,11 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     }, 340)
 
     const onPointerMove = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId !== event.pointerId) {
+      if (moveEvent.pointerId !== pointerId) {
         return
       }
       if (!activated) {
-        if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 10) {
+        if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 12) {
           window.clearTimeout(timer)
           clearListeners()
         }
@@ -344,13 +385,13 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     }
 
     const onPointerUp = (upEvent: PointerEvent) => {
-      if (upEvent.pointerId === event.pointerId) {
+      if (upEvent.pointerId === pointerId) {
         finishHold(false)
       }
     }
 
     const onPointerCancel = (cancelEvent: PointerEvent) => {
-      if (cancelEvent.pointerId === event.pointerId) {
+      if (cancelEvent.pointerId === pointerId) {
         finishHold(true)
       }
     }
@@ -358,10 +399,27 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp)
     window.addEventListener('pointercancel', onPointerCancel)
+    document.addEventListener('touchmove', preventNativeScroll, { passive: false })
   }
 
   return (
     <div className={styles.inputHost}>
+      {recording ? (
+        <div
+          className={clsx(
+            styles.voiceExternalBanner,
+            holdCancelling && styles.voiceExternalBannerCancel
+          )}
+        >
+          <span className={styles.voiceHoldDot} />
+          <span className={styles.voiceHoldTimer}>{voice.seconds}s</span>
+          <span>{holdCancelling ? t('voiceHoldCancelHint') : t('voiceHoldRecording')}</span>
+        </div>
+      ) : voice.status === 'transcribing' ? (
+        <button type="button" className={styles.voiceExternalBanner} onClick={() => voice.cancel()}>
+          <span>{t('voiceHoldTranscribing')}</span>
+        </button>
+      ) : null}
       <div
         className={clsx(
           styles.wrapper,
@@ -376,10 +434,11 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       >
         <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
         <div
-          className={styles.textareaWrapper}
+          ref={textareaWrapperRef}
+          className={clsx(styles.textareaWrapper, recording && styles.voiceHoldCapturing)}
           onPointerDown={startVoiceHold}
           onContextMenu={(event) => {
-            if (voiceHoldActiveRef.current || recording) {
+            if (voiceHoldPendingRef.current || voiceHoldActiveRef.current || recording) {
               event.preventDefault()
             }
           }}
@@ -432,25 +491,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             }}
           />
           {recording ? (
-            <div
-              className={clsx(styles.voiceHoldStage, holdCancelling && styles.voiceHoldStageCancel)}
-            >
-              <div className={styles.voiceHoldHeader}>
-                <span className={styles.voiceHoldDot} />
-                <span className={styles.voiceHoldTimer}>{voice.seconds}s</span>
-                <span>{holdCancelling ? t('voiceHoldCancelHint') : t('voiceHoldRecording')}</span>
-              </div>
+            <div className={styles.voiceHoldStage}>
               <Spectrum getAnalyser={voice.getAnalyser} />
             </div>
-          ) : null}
-          {voice.status === 'transcribing' ? (
-            <button
-              type="button"
-              className={styles.voiceTranscribingBar}
-              onClick={() => voice.cancel()}
-            >
-              <span>{t('voiceHoldTranscribing')}</span>
-            </button>
           ) : null}
           <div className={styles.mirror} aria-hidden>
             {`${text}\n`}

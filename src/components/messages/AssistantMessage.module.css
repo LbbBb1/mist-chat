@@ -11,6 +11,27 @@
   }
 }
 
+.avatarRow {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.avatarImg {
+  display: block;
+  object-fit: cover;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.avatarCircle {
+  border-radius: 50%;
+}
+
+.avatarSquare {
+  border-radius: 8px;
+}
+
 .waiting {
   display: flex;
   align-items: center;

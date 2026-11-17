@@ -1,7 +1,12 @@
 import clsx from 'clsx'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
-import { IconPanelLeftOutline16, IconSettingsOutline16, NewChatIcon } from '../base/icons.js'
+import {
+  IconPanelLeftOutline16,
+  IconSearchOutline16,
+  IconSettingsOutline16,
+  NewChatIcon,
+} from '../base/icons.js'
 import { setSiderCollapsed } from '../../services/settings.js'
 import { groupSessions } from '../../services/chat/sessionGroups.js'
 import { newChat, removeSession, useChatStore } from '../../services/chat/store.js'
@@ -12,10 +17,11 @@ import { Modal } from '../base/Modal.js'
 import { showToast } from '../base/toastState.js'
 import { openSettings } from '../settings/settingsDialogState.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
+import { openSessionSearch } from './sessionSearchState.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
 
-/** 展开的侧边栏：名称与收起按钮、开启新对话、按时间分组的会话列表、底部设置；移动端放在抽屉里，收起按钮关闭抽屉 */
+/** 展开的侧边栏：名称与收起按钮、开启新对话、全屏搜索入口、按时间分组的会话列表、底部设置；移动端放在抽屉里，收起按钮关闭抽屉 */
 export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const t = useTranslate()
   const sessions = useChatStore((state) => state.sessions)
@@ -73,6 +79,10 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           <NewChatIcon />
         </span>
         {t('newChat')}
+      </button>
+      <button type="button" className={styles.searchTrigger} onClick={openSessionSearch}>
+        <IconSearchOutline16 />
+        <span>{t('searchSessionsPlaceholder')}</span>
       </button>
       <div className={styles.listWrap}>
         <div className={styles.list}>

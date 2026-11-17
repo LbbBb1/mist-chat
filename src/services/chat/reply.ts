@@ -32,6 +32,13 @@ const toFileBlocks = (files: FileAttachment[], useLocalId = false): FileBlockPar
       : []
   })
 
+const filterSkippedFiles = (files: FileAttachment[], skipFileIds?: ReadonlySet<string>) =>
+  skipFileIds && skipFileIds.size > 0
+    ? files.filter(
+        (file) => !skipFileIds.has(file.id) && !(file.serverId && skipFileIds.has(file.serverId))
+      )
+    : files
+
 const toReplyBlock = (block: OutputBlockStart, now: number): ReplyBlock | null => {
   switch (block.type) {
     case 'text':
@@ -210,14 +217,39 @@ const isUsableReply = (message: Message, allowRefused = false): message is Assis
     message.blocks.some((block) => block.type === 'image' && block.fileId !== ''))
 
 /** 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用 */
-const toUserParam = ({ content, files }: UserMessage, useLocalId = false): MessageParam => {
-  const blocks = toFileBlocks(files, useLocalId)
-  return blocks.length === 0
-    ? { role: 'user', content }
-    : {
+const toUserParam = (
+  { content, files }: UserMessage,
+  useLocalId = false,
+  skipFileIds?: ReadonlySet<string>
+): { param: MessageParam; sentFiles: FileAttachment[] } => {
+  const activeFiles = filterSkippedFiles(files, skipFileIds)
+  const blocks = toFileBlocks(activeFiles, useLocalId)
+  const hadSkippedAllFiles =
+    activeFiles.length === 0 &&
+    files.length > 0 &&
+    blocks.length === 0 &&
+    skipFileIds &&
+    skipFileIds.size > 0 &&
+    files.some((f) => skipFileIds.has(f.id) || (f.serverId && skipFileIds.has(f.serverId)))
+  if (blocks.length === 0) {
+    return {
+      param: {
         role: 'user',
-        content: [...blocks, ...(content ? [{ type: 'text' as const, text: content }] : [])],
-      }
+        content: content || (hadSkippedAllFiles ? '[历史附件无法识别，已自动忽略]' : ''),
+      },
+      sentFiles: [],
+    }
+  }
+  const sentFiles = activeFiles.filter((file) =>
+    useLocalId ? (file.serverId ?? file.id) : file.serverId
+  )
+  return {
+    param: {
+      role: 'user',
+      content: [...blocks, ...(content ? [{ type: 'text' as const, text: content }] : [])],
+    },
+    sentFiles,
+  }
 }
 
 /**
@@ -231,7 +263,8 @@ const toUserParam = ({ content, files }: UserMessage, useLocalId = false): Messa
 const toAssistantParam = (
   { blocks }: AssistantMessage,
   prefix = false,
-  thinking = false
+  thinking = false,
+  stripReadLink = false
 ): Extract<MessageParam, { role: 'assistant' }> => {
   const content: AssistantBlockParam[] = []
   // 成功阅读的网页靠签名恢复正文；缺少有效签名时，调用与结果都不回传。
@@ -284,6 +317,7 @@ const toAssistantParam = (
       const { type, thinking, signature } = block
       content.push({ type, thinking, signature: signature ?? '' })
     } else if (
+      !stripReadLink &&
       block.type === 'server_tool_use' &&
       block.kind === 'read_link' &&
       !unsignedReadLinks.has(block.id)
@@ -291,6 +325,7 @@ const toAssistantParam = (
       const { type, id, name, input, kind } = block
       content.push({ type, id, name, input, kind })
     } else if (
+      !stripReadLink &&
       block.type === 'web_fetch_tool_result' &&
       block.kind === 'read_link' &&
       !unsignedReadLinks.has(block.tool_use_id)
@@ -298,9 +333,10 @@ const toAssistantParam = (
       content.push(block)
     }
   }
+  const filtered = content.filter((block) => block.type !== 'text' || block.text !== '')
   return {
     role: 'assistant',
-    content: content.filter((block) => block.type !== 'text' || block.text !== ''),
+    content: filtered.length > 0 || !stripReadLink ? filtered : [{ type: 'text', text: '...' }],
   }
 }
 
@@ -320,6 +356,95 @@ export const getContextRounds = (
   return rounds
 }
 
+export type RequestBuildOptions = {
+  skipFileIds?: ReadonlySet<string>
+  skipRoundUserIds?: ReadonlySet<string>
+  stripReadLinkAssistantIds?: ReadonlySet<string>
+  dropLeadingRounds?: number
+}
+
+export type RequestMessageSource =
+  | { kind: 'reminder' }
+  | { kind: 'historyUser'; userMessageId: string; sentFiles: FileAttachment[] }
+  | { kind: 'historyAssistant'; userMessageId: string; assistantMessageId: string }
+  | { kind: 'currentQuestion' }
+  | { kind: 'prefix' }
+
+export const toRequestMessagesWithSources = (
+  history: Message[],
+  question: UserMessage,
+  prefix?: AssistantMessage,
+  thinking = prefix?.thinking ?? false,
+  latestReminder?: string,
+  allowRefused = false,
+  useLocalFileId = false,
+  options?: RequestBuildOptions
+): {
+  messages: MessageParam[]
+  sourceEntries: RequestMessageSource[]
+  roundCount: number
+} => {
+  const messages: MessageParam[] = []
+  const sourceEntries: RequestMessageSource[] = []
+  let previousReminder: string | undefined
+  const appendReminder = (reminder: string | undefined) => {
+    // 仅在当前分支首次出现或内容变化时插入快照；缺少快照的消息保持原有内容。
+    if (reminder && reminder !== previousReminder) {
+      messages.push({ role: 'latest_reminder', content: reminder })
+      sourceEntries.push({ kind: 'reminder' })
+      previousReminder = reminder
+    }
+  }
+  const allRounds = getContextRounds(history, allowRefused).slice(
+    Math.max(0, options?.dropLeadingRounds ?? 0)
+  )
+  let roundCount = 0
+  for (const [user, reply] of allRounds) {
+    if (options?.skipRoundUserIds?.has(user.id)) {
+      continue
+    }
+    const builtUser = toUserParam(user, useLocalFileId, options?.skipFileIds)
+    // 历史提问没有文字也没有可用内容块时，连同回答一起省略。
+    if (!builtUser.param.content) {
+      continue
+    }
+    const assistantParam = toAssistantParam(
+      reply,
+      false,
+      false,
+      options?.stripReadLinkAssistantIds?.has(reply.id) ?? false
+    )
+    if (assistantParam.content.length === 0) {
+      continue
+    }
+    appendReminder(reply.latestReminder)
+    messages.push(builtUser.param, assistantParam)
+    sourceEntries.push(
+      { kind: 'historyUser', userMessageId: user.id, sentFiles: builtUser.sentFiles },
+      { kind: 'historyAssistant', userMessageId: user.id, assistantMessageId: reply.id }
+    )
+    roundCount += 1
+  }
+  appendReminder(latestReminder)
+  messages.push(toUserParam(question, useLocalFileId).param)
+  sourceEntries.push({ kind: 'currentQuestion' })
+  if (prefix?.prefix) {
+    const assistant = toAssistantParam(prefix, true, thinking)
+    // 没有非空白正文或有效思考时直接重发原问题，避免服务端拒绝空 Prefill。
+    if (
+      assistant.content.some(
+        (block) =>
+          (block.type === 'text' && block.text.trim()) ||
+          (block.type === 'thinking' && block.thinking.trim())
+      )
+    ) {
+      messages.push(assistant)
+      sourceEntries.push({ kind: 'prefix' })
+    }
+  }
+  return { messages, sourceEntries, roundCount }
+}
+
 /**
  * 把会话转成请求的 messages：只保留「提问 + 有回答的回复」成对的轮次，最后接上本轮提问。
  * 失败或没有回答的轮次不进上下文。续写时末尾再带上本轮 assistant。
@@ -332,41 +457,16 @@ export const toRequestMessages = (
   latestReminder?: string,
   allowRefused = false,
   useLocalFileId = false
-): MessageParam[] => {
-  const messages: MessageParam[] = []
-  let previousReminder: string | undefined
-  const appendReminder = (reminder: string | undefined) => {
-    // 仅在当前分支首次出现或内容变化时插入快照；缺少快照的消息保持原有内容。
-    if (reminder && reminder !== previousReminder) {
-      messages.push({ role: 'latest_reminder', content: reminder })
-      previousReminder = reminder
-    }
-  }
-  for (const [user, reply] of getContextRounds(history, allowRefused)) {
-    // 历史提问没有文字、附件也都没有引用 id 时，提问为空，连同回答一起省略。
-    if (!user.content && toFileBlocks(user.files, useLocalFileId).length === 0) {
-      continue
-    }
-    appendReminder(reply.latestReminder)
-    messages.push(toUserParam(user, useLocalFileId), toAssistantParam(reply))
-  }
-  appendReminder(latestReminder)
-  messages.push(toUserParam(question, useLocalFileId))
-  if (prefix?.prefix) {
-    const assistant = toAssistantParam(prefix, true, thinking)
-    // 没有非空白正文或有效思考时直接重发原问题，避免服务端拒绝空 Prefill。
-    if (
-      assistant.content.some(
-        (block) =>
-          (block.type === 'text' && block.text.trim()) ||
-          (block.type === 'thinking' && block.thinking.trim())
-      )
-    ) {
-      messages.push(assistant)
-    }
-  }
-  return messages
-}
+): MessageParam[] =>
+  toRequestMessagesWithSources(
+    history,
+    question,
+    prefix,
+    thinking,
+    latestReminder,
+    allowRefused,
+    useLocalFileId
+  ).messages
 
 /** 思考用时（秒），至少 1 秒 */
 export const getThinkingSeconds = (startedAt: number, endedAt: number) =>

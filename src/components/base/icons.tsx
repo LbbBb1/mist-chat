@@ -762,3 +762,43 @@ export const IconBranchOutline16 = () => (
     />
   </svg>
 )
+
+export const IconPinOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M9.8 2.2L13.8 6.2L12.5 7.5L11.4 6.9L8.4 9.9L8.7 11.9L7.6 13L5.3 10.7L2.5 13.5L1.8 12.8L4.6 10L2.3 7.7L3.4 6.6L5.4 6.9L8.4 3.9L7.8 2.8L9.8 2.2Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconChevronLeftOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M10.25 3.25L5.5 8L10.25 12.75"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+export const IconChatBubbleOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M8 2.25C4.55 2.25 1.75 4.72 1.75 7.77C1.75 9.15 2.33 10.42 3.29 11.39C3.22 12.19 2.9 12.95 2.41 13.57C3.37 13.52 4.31 13.21 5.09 12.69C5.98 13.08 6.97 13.29 8 13.29C11.45 13.29 14.25 10.82 14.25 7.77C14.25 4.72 11.45 2.25 8 2.25Z"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M5.25 6.85H10.75M5.25 9.15H8.85"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+    />
+  </svg>
+)

@@ -1,8 +1,13 @@
 import clsx from 'clsx'
 import { memo, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
-import { IconEditOutline16, IconEllipsisOutline16, IconTrashOutline16 } from '../base/icons.js'
-import { renameSession, selectSession } from '../../services/chat/store.js'
+import {
+  IconEditOutline16,
+  IconEllipsisOutline16,
+  IconPinOutline16,
+  IconTrashOutline16,
+} from '../base/icons.js'
+import { renameSession, selectSession, togglePinSession } from '../../services/chat/store.js'
 import type { SessionSummary } from '../../services/chat/types.js'
 import { IconButton } from '../base/IconButton.js'
 import { Menu } from '../base/Menu.js'
@@ -57,10 +62,24 @@ export const SessionItem = memo(function SessionItem({
       }}
     >
       <div className={styles.title}>{displayTitle}</div>
+      {session.pinnedAt ? (
+        <span className={styles.pinBadge} aria-hidden>
+          <IconPinOutline16 />
+        </span>
+      ) : null}
       <div className={styles.action} onClick={(event) => event.stopPropagation()}>
         <Menu
           onOpenChange={setMenuOpen}
           options={[
+            {
+              key: 'pin',
+              label: t(session.pinnedAt ? 'unpinSession' : 'pinSession'),
+              icon: <IconPinOutline16 />,
+              onSelect: () => {
+                setMenuOpen(false)
+                togglePinSession(session.id)
+              },
+            },
             {
               key: 'rename',
               label: t('sessionItemMenuRenameOption'),

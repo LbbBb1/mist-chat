@@ -199,3 +199,40 @@ export const forkPathMessages = (
     selectedChildId: index < chain.length - 1 ? newIds[index + 1] : undefined,
   }))
 }
+
+/** 将会话的分支路径调整为包含目标消息（若目标处于非当前分支中，逐级切换父节点选中子项）。 */
+export const revealMessageBranch = (original: Session, messageId: string): Session => {
+  const session = normalizeSession(original)
+  const byId = new Map(session.messages.map((item) => [item.id, item]))
+  if (!byId.has(messageId)) {
+    return original
+  }
+  const updates = new Map<string, string>()
+  let rootMessageId = session.rootMessageId ?? null
+  let childId: string | null = messageId
+  const visited = new Set<string>()
+  while (childId && !visited.has(childId)) {
+    visited.add(childId)
+    const child = byId.get(childId)
+    if (!child) {
+      break
+    }
+    const parentId = child.parentId ?? null
+    if (parentId === null) {
+      rootMessageId = child.id
+      break
+    }
+    updates.set(parentId, child.id)
+    childId = parentId
+  }
+  let changed = rootMessageId !== (session.rootMessageId ?? null)
+  const messages = session.messages.map((item) => {
+    const nextChild = updates.get(item.id)
+    if (nextChild && item.selectedChildId !== nextChild) {
+      changed = true
+      return { ...item, selectedChildId: nextChild }
+    }
+    return item
+  })
+  return changed ? { ...session, rootMessageId, messages } : original
+}

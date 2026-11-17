@@ -37,6 +37,7 @@ import {
   useMobileSider,
 } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
+import { SessionSearchOverlay } from '../components/sider/SessionSearchOverlay.js'
 import styles from './App.module.css'
 
 export const App = () => {
@@ -297,6 +298,7 @@ export const App = () => {
       <UpdateModal />
       <VoiceCallOverlay />
       <ImageViewer />
+      <SessionSearchOverlay />
       <Toast />
     </>
   )

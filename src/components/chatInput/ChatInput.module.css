@@ -207,9 +207,15 @@
   }
 }
 
-/* 录音中由频谱接管第一行，隐藏正文但保留高度 */
+/* 录音中由频谱接管输入区，用 opacity 隐藏正文但保留交互宿主与高度，避免 Android WebView 触发 pointercancel */
 .textareaHidden {
-  visibility: hidden;
+  opacity: 0;
+}
+
+.voiceHoldCapturing {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 @media not all and (min-width: 440px) {
@@ -492,29 +498,42 @@
   inset: 0;
   z-index: 2;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 4px;
   padding: 6px 14px;
   pointer-events: none;
 }
 
-.voiceHoldStageCancel {
-  opacity: 0.92;
-}
-
-.voiceHoldHeader {
-  display: flex;
+.voiceExternalBanner {
+  display: inline-flex;
   align-items: center;
+  align-self: center;
   gap: 8px;
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 500;
+  max-width: calc(100% - 16px);
+  margin: 0 auto 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(77, 107, 254, 0.28);
+  background: var(--dsw-alias-bg-layer-1, #fff);
   color: var(--dsw-alias-brand-text);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  pointer-events: auto;
 }
 
-.voiceHoldStageCancel .voiceHoldHeader {
+.voiceExternalBannerCancel {
+  border-color: rgba(239, 68, 68, 0.35);
   color: var(--dsw-alias-state-error-primary);
+}
+
+button.voiceExternalBanner {
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  cursor: pointer;
 }
 
 .voiceHoldDot {

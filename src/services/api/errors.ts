@@ -114,3 +114,39 @@ export const getUploadErrorInfo = (error: unknown): UploadErrorInfo | null => {
   }
   return null
 }
+
+/** 从报错信息中提取出出错的消息下标和内容块下标（如 `messages.378.content.0`）。 */
+export const parseMessageErrorLocation = (
+  message: string
+): { messageIndex: number; blockIndex?: number } | null => {
+  const match = /\bmessages\.(\d+)(?:\.content\.(\d+))?/i.exec(message)
+  if (!match) {
+    return null
+  }
+  const messageIndex = Number.parseInt(match[1], 10)
+  if (!Number.isFinite(messageIndex) || messageIndex < 0) {
+    return null
+  }
+  const blockIndex = match[2] !== undefined ? Number.parseInt(match[2], 10) : undefined
+  return {
+    messageIndex,
+    ...(blockIndex !== undefined && Number.isFinite(blockIndex) && blockIndex >= 0
+      ? { blockIndex }
+      : {}),
+  }
+}
+
+export const isTooManyImagesError = (error: unknown): boolean =>
+  error instanceof ApiError &&
+  error.status === 400 &&
+  /too many (images|files)|at most \d+ (images|files)|maximum.*(images|files)|image.*limit/i.test(
+    error.message
+  )
+
+export const isContextOverflowError = (error: unknown): boolean =>
+  error instanceof ApiError &&
+  (error.status === 413 ||
+    (error.status === 400 &&
+      /maximum context length|context_length_exceeded|too many tokens|prompt is too long|exceed.*token|context window|input.*too long/i.test(
+        error.message
+      )))

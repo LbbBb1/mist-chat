@@ -1,22 +1,30 @@
 package com.deepchat.app;
 
+import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.BridgeActivity;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,6 +34,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URL;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -62,6 +71,9 @@ public class MainActivity extends BridgeActivity {
     private volatile String updateError = "";
     private volatile File downloadedApkFile = null;
     private long lastBackPressAt = 0L;
+    private volatile File pendingSaveFile = null;
+    private volatile String pendingSaveFileName = "";
+    private ActivityResultLauncher<Intent> saveFileLauncher;
 
     public class ProxyBridge {
         @JavascriptInterface
@@ -238,6 +250,46 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        saveFileLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                final File src = pendingSaveFile;
+                final String name = pendingSaveFileName;
+                pendingSaveFile = null;
+                pendingSaveFileName = "";
+                if (result.getResultCode() == Activity.RESULT_OK
+                    && result.getData() != null
+                    && result.getData().getData() != null
+                    && src != null
+                    && src.exists()) {
+                    final Uri destUri = result.getData().getData();
+                    new Thread(() -> {
+                        try (
+                            InputStream fis = new FileInputStream(src);
+                            OutputStream os = getContentResolver().openOutputStream(destUri)
+                        ) {
+                            if (os != null) {
+                                byte[] buf = new byte[16384];
+                                int n;
+                                while ((n = fis.read(buf)) != -1) {
+                                    os.write(buf, 0, n);
+                                }
+                                os.flush();
+                            }
+                            runOnUiThread(() -> Toast.makeText(this, "已保存：" + name, Toast.LENGTH_LONG).show());
+                        } catch (Exception e) {
+                            runOnUiThread(() -> Toast.makeText(this, "保存失败：" + e.getMessage(), Toast.LENGTH_SHORT).show());
+                        } finally {
+                            //noinspection ResultOfMethodCallIgnored
+                            src.delete();
+                        }
+                    }, "DeepChatSavePicker").start();
+                } else if (src != null && src.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    src.delete();
+                }
+            }
+        );
         startLocalProxy();
         super.onCreate(savedInstanceState);
         if (getBridge() != null && getBridge().getWebView() != null) {
@@ -334,9 +386,10 @@ public class MainActivity extends BridgeActivity {
             }
             String[] parts = requestLine.split(" ");
             String method = parts.length > 0 ? parts[0].toUpperCase(Locale.ROOT) : "GET";
+            String requestPath = parts.length > 1 ? parts[1] : "/";
 
             Map<String, String> headers = new LinkedHashMap<>();
-            int contentLength = 0;
+            long contentLength = 0L;
             String line;
             while ((line = readLine(in)) != null && !line.isEmpty()) {
                 int colon = line.indexOf(':');
@@ -346,7 +399,7 @@ public class MainActivity extends BridgeActivity {
                     headers.put(name, value);
                     if ("content-length".equalsIgnoreCase(name)) {
                         try {
-                            contentLength = Math.max(0, Integer.parseInt(value));
+                            contentLength = Math.max(0L, Long.parseLong(value));
                         } catch (NumberFormatException ignored) {
                         }
                     }
@@ -367,16 +420,22 @@ public class MainActivity extends BridgeActivity {
                 return;
             }
 
-            byte[] body = new byte[contentLength];
+            if ("POST".equals(method) && requestPath.startsWith("/__deepchat_save_file")) {
+                handleSaveFileRequest(requestPath, contentLength, in, out);
+                return;
+            }
+
+            int bodyLen = (int) Math.min(Integer.MAX_VALUE, contentLength);
+            byte[] body = new byte[bodyLen];
             int offset = 0;
-            while (offset < contentLength) {
-                int read = in.read(body, offset, contentLength - offset);
+            while (offset < bodyLen) {
+                int read = in.read(body, offset, bodyLen - offset);
                 if (read < 0) {
                     break;
                 }
                 offset += read;
             }
-            if (offset < contentLength) {
+            if (offset < bodyLen) {
                 body = Arrays.copyOf(body, offset);
             }
 
@@ -500,6 +559,122 @@ public class MainActivity extends BridgeActivity {
             return null;
         }
         return buf.toString(StandardCharsets.ISO_8859_1.name());
+    }
+
+    private void handleSaveFileRequest(
+        String requestPath,
+        long contentLength,
+        BufferedInputStream in,
+        OutputStream out
+    ) throws IOException {
+        String fileName = "deepchat-export.bin";
+        String mimeType = "application/octet-stream";
+        int qIndex = requestPath.indexOf('?');
+        if (qIndex >= 0) {
+            String query = requestPath.substring(qIndex + 1);
+            for (String pair : query.split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq > 0) {
+                    String key = URLDecoder.decode(pair.substring(0, eq), "UTF-8");
+                    String val = URLDecoder.decode(pair.substring(eq + 1), "UTF-8");
+                    if ("name".equals(key) && !val.trim().isEmpty()) {
+                        fileName = val.trim();
+                    } else if ("mime".equals(key) && !val.trim().isEmpty()) {
+                        mimeType = val.trim();
+                    }
+                }
+            }
+        }
+        final String safeName = fileName.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1F]", "_");
+        File exportDir = new File(getCacheDir(), "exports");
+        if (!exportDir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            exportDir.mkdirs();
+        }
+        File tempFile = new File(exportDir, System.currentTimeMillis() + "_" + safeName);
+        byte[] buf = new byte[16384];
+        long remaining = contentLength;
+        try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+            while (remaining > 0L) {
+                int toRead = (int) Math.min(buf.length, remaining);
+                int read = in.read(buf, 0, toRead);
+                if (read < 0) {
+                    break;
+                }
+                fos.write(buf, 0, read);
+                remaining -= read;
+            }
+            fos.flush();
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                ContentResolver resolver = getContentResolver();
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Downloads.DISPLAY_NAME, safeName);
+                values.put(MediaStore.Downloads.MIME_TYPE, mimeType);
+                values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DeepChat");
+                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri != null) {
+                    try (
+                        InputStream fis = new FileInputStream(tempFile);
+                        OutputStream dest = resolver.openOutputStream(uri)
+                    ) {
+                        if (dest == null) {
+                            throw new IOException("Cannot open download output stream");
+                        }
+                        int n;
+                        while ((n = fis.read(buf)) != -1) {
+                            dest.write(buf, 0, n);
+                        }
+                        dest.flush();
+                    }
+                    values.clear();
+                    values.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                    resolver.update(uri, values, null, null);
+                    //noinspection ResultOfMethodCallIgnored
+                    tempFile.delete();
+                    runOnUiThread(() ->
+                        Toast.makeText(this, "已保存到「下载/DeepChat/" + safeName + "」", Toast.LENGTH_LONG).show()
+                    );
+                    sendJsonOk(out, "{\"ok\":true,\"mode\":\"android\"}");
+                    return;
+                }
+            } catch (Exception ignored) {
+                // 回退到系统文档保存选择器
+            }
+        }
+
+        if (pendingSaveFile != null && pendingSaveFile.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            pendingSaveFile.delete();
+        }
+        pendingSaveFile = tempFile;
+        pendingSaveFileName = safeName;
+        final String finalMime = mimeType;
+        runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType(finalMime);
+            intent.putExtra(Intent.EXTRA_TITLE, safeName);
+            saveFileLauncher.launch(intent);
+        });
+        sendJsonOk(out, "{\"ok\":true,\"mode\":\"picker\"}");
+    }
+
+    private static void sendJsonOk(OutputStream out, String json) throws IOException {
+        byte[] payload = json.getBytes(StandardCharsets.UTF_8);
+        String header = "HTTP/1.1 200 OK\r\n"
+            + "Content-Type: application/json; charset=utf-8\r\n"
+            + "Content-Length: " + payload.length + "\r\n"
+            + "Access-Control-Allow-Origin: *\r\n"
+            + "Access-Control-Expose-Headers: *\r\n"
+            + "x-local-proxy: 1\r\n"
+            + "Connection: close\r\n\r\n";
+        out.write(header.getBytes(StandardCharsets.ISO_8859_1));
+        out.write(payload);
+        out.flush();
     }
 
     private static void sendJsonError(OutputStream out, int status, String message) throws IOException {

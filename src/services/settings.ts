@@ -7,6 +7,7 @@ export type Locale = 'zh-CN' | 'en-US'
 
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
+export type AvatarShape = 'circle' | 'square'
 
 /** 主语言模型接口协议：deepseek / openai / responses / local（本地部署免密钥） */
 export type ChatProtocol = 'deepseek' | 'openai' | 'responses' | 'local'
@@ -77,6 +78,12 @@ export type Settings = {
   location: UserLocation | null
   ttsVoice: TtsVoice
   autoPlayVoice: boolean
+  voiceAutoSend: boolean
+  collapseThinking: boolean
+  avatarEnabled: boolean
+  avatarDataUrl: string
+  avatarShape: AvatarShape
+  avatarSize: number
   autoCheckUpdate: boolean
   tokenLimitEnabled: boolean
   dailyTokenLimit: number
@@ -129,6 +136,12 @@ const KEYS = {
   themePreference: 'chat-demo:theme-preference',
   ttsVoice: 'chat-demo:tts-voice',
   autoPlayVoice: 'chat-demo:auto-play-voice',
+  voiceAutoSend: 'chat-demo:voice-auto-send',
+  collapseThinking: 'chat-demo:collapse-thinking',
+  avatarEnabled: 'chat-demo:avatar-enabled',
+  avatarDataUrl: 'chat-demo:avatar-data-url',
+  avatarShape: 'chat-demo:avatar-shape',
+  avatarSize: 'chat-demo:avatar-size',
   autoCheckUpdate: 'chat-demo:auto-check-update',
   tokenLimitEnabled: 'chat-demo:token-limit-enabled',
   dailyTokenLimit: 'chat-demo:daily-token-limit',
@@ -325,6 +338,12 @@ export const useSettings = create<Settings>(() => ({
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
   autoPlayVoice: readBool(KEYS.autoPlayVoice, false),
+  voiceAutoSend: readBool(KEYS.voiceAutoSend, true),
+  collapseThinking: readBool(KEYS.collapseThinking, false),
+  avatarEnabled: readBool(KEYS.avatarEnabled, false),
+  avatarDataUrl: read(KEYS.avatarDataUrl) ?? '',
+  avatarShape: read(KEYS.avatarShape) === 'square' ? 'square' : 'circle',
+  avatarSize: Math.min(64, Math.max(24, Math.round(readNumber(KEYS.avatarSize) ?? 36))),
   autoCheckUpdate: readBool(KEYS.autoCheckUpdate, true),
   tokenLimitEnabled: readBool(KEYS.tokenLimitEnabled, false),
   dailyTokenLimit: Math.max(1000, Math.round(readNumber(KEYS.dailyTokenLimit) ?? 100_000)),
@@ -388,6 +407,31 @@ export const setTtsVoice = (ttsVoice: TtsVoice) => {
 
 export const setAutoPlayVoice = (value: boolean) =>
   setBoolSetting(KEYS.autoPlayVoice, 'autoPlayVoice', value)
+
+export const setVoiceAutoSend = (value: boolean) =>
+  setBoolSetting(KEYS.voiceAutoSend, 'voiceAutoSend', value)
+
+export const setCollapseThinking = (value: boolean) =>
+  setBoolSetting(KEYS.collapseThinking, 'collapseThinking', value)
+
+export const setAvatarEnabled = (value: boolean) =>
+  setBoolSetting(KEYS.avatarEnabled, 'avatarEnabled', value)
+
+export const setAvatarDataUrl = (avatarDataUrl: string) => {
+  write(KEYS.avatarDataUrl, avatarDataUrl || null)
+  useSettings.setState({ avatarDataUrl })
+}
+
+export const setAvatarShape = (avatarShape: AvatarShape) => {
+  write(KEYS.avatarShape, avatarShape)
+  useSettings.setState({ avatarShape })
+}
+
+export const setAvatarSize = (value: number) => {
+  const avatarSize = Math.min(64, Math.max(24, Math.round(value)))
+  write(KEYS.avatarSize, String(avatarSize))
+  useSettings.setState({ avatarSize })
+}
 
 export const setAutoCheckUpdate = (value: boolean) =>
   setBoolSetting(KEYS.autoCheckUpdate, 'autoCheckUpdate', value)

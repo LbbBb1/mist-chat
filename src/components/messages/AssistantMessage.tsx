@@ -66,6 +66,10 @@ export const AssistantMessage = memo(function AssistantMessage({
   const allowRefusedContext = useSettings((state) => state.allowRefusedContext)
   const allowEditAssistant = useSettings((state) => state.allowEditAssistant)
   const refusalMessage = useSettings((state) => state.refusalMessage)
+  const avatarEnabled = useSettings((state) => state.avatarEnabled)
+  const avatarDataUrl = useSettings((state) => state.avatarDataUrl)
+  const avatarShape = useSettings((state) => state.avatarShape)
+  const avatarSize = useSettings((state) => state.avatarSize)
   const view = useReplyView(message, streaming)
   const panelEntry = useSearchPanel((state) => state.entry)
   // 默认安全拒绝时按协议丢弃思考与正文；开启 keepRefusedContent 后保留已下发内容。
@@ -123,6 +127,19 @@ export const AssistantMessage = memo(function AssistantMessage({
 
   return (
     <div className={styles.message}>
+      {avatarEnabled && avatarDataUrl ? (
+        <div className={styles.avatarRow}>
+          <img
+            src={avatarDataUrl}
+            alt=""
+            className={clsx(
+              styles.avatarImg,
+              avatarShape === 'circle' ? styles.avatarCircle : styles.avatarSquare
+            )}
+            style={{ width: avatarSize, height: avatarSize }}
+          />
+        </div>
+      ) : null}
       {refused ? null : (
         <ReplyArea
           message={message}

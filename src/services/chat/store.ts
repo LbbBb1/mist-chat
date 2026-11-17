@@ -11,7 +11,14 @@ import {
 } from '../api/openai.js'
 import { getApiOrigin } from '../api/origin.js'
 import type { ChatModel, CreateMessageRequest } from '../api/types.js'
-import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
+import {
+  extractFileIds,
+  getFileErrorCode,
+  isContextOverflowError,
+  isRetryableApiError,
+  isTooManyImagesError,
+  parseMessageErrorLocation,
+} from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { matchesRefusalKeyword, setImageGen, useSettings } from '../settings.js'
 import { toggleReadAloud } from '../speech/readAloud.js'
@@ -22,6 +29,7 @@ import {
   forkPathMessages,
   getVisibleMessages,
   normalizeSession,
+  revealMessageBranch,
   selectVersion,
 } from './branches.js'
 import * as db from './db.js'
@@ -42,7 +50,8 @@ import {
   getContextRounds,
   getReplyText,
   settleReply,
-  toRequestMessages,
+  toRequestMessagesWithSources,
+  type RequestMessageSource,
 } from './reply.js'
 import {
   toSessionSummary,
@@ -111,7 +120,17 @@ export const useChatStore = create<ChatState>(() => ({
 const { getState: get, setState: set } = useChatStore
 
 const sortSessions = (sessions: SessionSummary[]) =>
-  [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  [...sessions].sort((a, b) => {
+    const aPinned = typeof a.pinnedAt === 'number' && a.pinnedAt > 0
+    const bPinned = typeof b.pinnedAt === 'number' && b.pinnedAt > 0
+    if (aPinned !== bPinned) {
+      return aPinned ? -1 : 1
+    }
+    if (aPinned && bPinned && a.pinnedAt !== b.pinnedAt) {
+      return (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)
+    }
+    return b.updatedAt - a.updatedAt
+  })
 
 const getSession = (id: string) => {
   const cache = get().sessionCache
@@ -124,7 +143,10 @@ const getStreamController = (id: string) => {
 }
 
 const sameSummary = (a: SessionSummary, b: SessionSummary) =>
-  a.title === b.title && a.createdAt === b.createdAt && a.updatedAt === b.updatedAt
+  a.title === b.title &&
+  a.createdAt === b.createdAt &&
+  a.updatedAt === b.updatedAt &&
+  a.pinnedAt === b.pinnedAt
 
 const sessionAccess = new Map<string, number>()
 const unsavedSessions = new Set<string>()
@@ -496,6 +518,20 @@ export const selectSession = (id: string) => {
   }
 }
 
+export const selectSessionAndReveal = (id: string, messageId?: string) => {
+  if (get().importingHistory || !get().sessions.some((session) => session.id === id)) {
+    return
+  }
+  touchSession(id)
+  set({ activeId: id })
+  void ensureSessionLoaded(id).then(() => {
+    if (messageId && !getStreamController(id)) {
+      updateSession(id, (session) => revealMessageBranch(session, messageId))
+    }
+  })
+  trimSessionCache()
+}
+
 export const renameSession = (id: string, title: string) => {
   if (get().importingHistory || deletingSessions.has(id)) {
     return
@@ -514,6 +550,30 @@ export const renameSession = (id: string, title: string) => {
       ),
     }))
     void db.renameSession(id, title).catch(db.reportStorageError('rename session'))
+  }
+}
+
+export const togglePinSession = (id: string) => {
+  if (get().importingHistory || deletingSessions.has(id)) {
+    return
+  }
+  const currentSummary = get().sessions.find((session) => session.id === id)
+  if (!currentSummary) {
+    return
+  }
+  const nextPinnedAt = currentSummary.pinnedAt ? undefined : Date.now()
+  if (getSession(id)) {
+    updateSession(id, (session) => ({ ...session, pinnedAt: nextPinnedAt }))
+    persist(id)
+  } else {
+    set((state) => ({
+      sessions: sortSessions(
+        state.sessions.map((session) =>
+          session.id === id ? { ...session, pinnedAt: nextPinnedAt } : session
+        )
+      ),
+    }))
+    void db.setSessionPinned(id, nextPinnedAt).catch(db.reportStorageError('pin session'))
   }
 }
 
@@ -1008,13 +1068,50 @@ const refreshRequest = (sessionId: string, request: Request): Request => {
   }
 }
 
+const SKIPPED_HISTORY_FILES_KEY = 'deepchat_skipped_history_files'
+const MAX_SKIPPED_HISTORY_FILES = 500
+const MAX_HISTORY_HEAL_ATTEMPTS = 8
+
+const getSkippedHistoryFileIds = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem(SKIPPED_HISTORY_FILES_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+const markSkippedHistoryFileIds = (ids: string[]) => {
+  if (ids.length === 0) {
+    return
+  }
+  try {
+    const set = getSkippedHistoryFileIds()
+    for (const id of ids) {
+      if (id) {
+        set.add(id)
+      }
+    }
+    const list = [...set].slice(-MAX_SKIPPED_HISTORY_FILES)
+    localStorage.setItem(SKIPPED_HISTORY_FILES_KEY, JSON.stringify(list))
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 /**
  * 发送前补齐附件的 serverId。
  * - 本轮提问的附件并行补齐，任一失败则整体失败，已成功的照常写回，重试时复用成功结果；
  * - 历史轮次（仅进入上下文的）中没有 serverId 的附件，多为导入的图片：从最新的消息往前逐张补传，
  *   失败静默跳过，该附件不进入本次请求，下次发送时再试。
  */
-const prepareFiles = async (sessionId: string, request: Request, signal: AbortSignal) => {
+const prepareFiles = async (
+  sessionId: string,
+  request: Request,
+  signal: AbortSignal,
+  skippedHistoryFileIds: ReadonlySet<string> = new Set()
+) => {
   const epoch = historyEpoch
   // 服务端判定 file_id 失效时会清掉会话里的 serverId，先用最新消息替换请求快照，
   // 否则快照里仍是旧 id，补传会直接复用它。
@@ -1048,7 +1145,12 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
   const pending = new Map<string, FileAttachment>()
   for (const [user] of getContextRounds(request.history, allowRefusedContext).toReversed()) {
     for (const file of user.files) {
-      if (!file.serverId && !serverIds.has(file.id) && !pending.has(file.id)) {
+      if (
+        !file.serverId &&
+        !skippedHistoryFileIds.has(file.id) &&
+        !serverIds.has(file.id) &&
+        !pending.has(file.id)
+      ) {
         pending.set(file.id, file)
       }
     }
@@ -1643,10 +1745,18 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
   streamFlushes.set(sessionId, flush)
 
   try {
+    const skippedHistoryFileIds = getSkippedHistoryFileIds()
+    const skipRoundUserIds = new Set<string>()
+    const stripReadLinkAssistantIds = new Set<string>()
+    let dropLeadingRounds = 0
+    let healAttempts = 0
+
     for (let attempt = 0; ; attempt += 1) {
       /** 附件补齐前出错属于上传失败，请求还没有发出 */
       let preparing = true
       let receivedContent = false
+      let builtSourceEntries: RequestMessageSource[] = []
+      let builtRoundCount = 0
       try {
         const settings = useSettings.getState()
         const useDeepSeekFiles =
@@ -1654,7 +1764,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           settings.visionChannel.mode === 'inherit' &&
           settings.ocrChannel.mode === 'inherit'
         const prepared = useDeepSeekFiles
-          ? await prepareFiles(sessionId, request, controller.signal)
+          ? await prepareFiles(sessionId, request, controller.signal, skippedHistoryFileIds)
           : {
               history: request.history,
               question: request.question,
@@ -1677,15 +1787,24 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         reply = { ...reply, ...(latestReminder ? { latestReminder } : {}) }
         updateReply(sessionId, reply)
         persist(sessionId)
-        const messages = toRequestMessages(
+        const builtRequest = toRequestMessagesWithSources(
           prepared.history,
           inlinePrepared.question,
           prepared.prefix,
           initial.thinking ?? false,
           latestReminder,
           settings.allowRefusedContext,
-          settings.chatProtocol !== 'deepseek'
+          settings.chatProtocol !== 'deepseek',
+          {
+            skipFileIds: skippedHistoryFileIds,
+            skipRoundUserIds,
+            stripReadLinkAssistantIds,
+            dropLeadingRounds,
+          }
         )
+        const messages = builtRequest.messages
+        builtSourceEntries = builtRequest.sourceEntries
+        builtRoundCount = builtRequest.roundCount
         const baseSystem = settings.systemPrompt.trim()
         const voiceSystem = request.voiceCall ? settings.voiceSystemPrompt.trim() : ''
         const visionHint =
@@ -1913,6 +2032,69 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             break
           }
           continue
+        }
+        // 老对话/导入历史消息自愈：自动跳过服务端拒绝的历史破损图片、失效工具块或超长头部轮次后重发。
+        if (!preparing && !receivedContent && healAttempts < MAX_HISTORY_HEAL_ATTEMPTS) {
+          const loc = error instanceof ApiError ? parseMessageErrorLocation(error.message) : null
+          const source = loc ? builtSourceEntries[loc.messageIndex] : undefined
+          if (source?.kind === 'historyUser') {
+            const mentioned = error instanceof ApiError ? extractFileIds(error.message) : []
+            const indexedFile =
+              typeof loc?.blockIndex === 'number' ? source.sentFiles[loc.blockIndex] : undefined
+            const badIds = [
+              ...(indexedFile
+                ? [indexedFile.id, ...(indexedFile.serverId ? [indexedFile.serverId] : [])]
+                : []),
+              ...mentioned,
+            ]
+            if (badIds.length > 0) {
+              badIds.forEach((id) => skippedHistoryFileIds.add(id))
+              markSkippedHistoryFileIds(badIds)
+            } else if (
+              source.sentFiles.length > 0 &&
+              /image|file|content|format/i.test(String(error))
+            ) {
+              const allFileIds = source.sentFiles.flatMap((file) => [
+                file.id,
+                ...(file.serverId ? [file.serverId] : []),
+              ])
+              allFileIds.forEach((id) => skippedHistoryFileIds.add(id))
+              markSkippedHistoryFileIds(allFileIds)
+            } else {
+              skipRoundUserIds.add(source.userMessageId)
+            }
+            healAttempts += 1
+            continue
+          }
+          if (source?.kind === 'historyAssistant') {
+            if (!stripReadLinkAssistantIds.has(source.assistantMessageId)) {
+              stripReadLinkAssistantIds.add(source.assistantMessageId)
+            } else {
+              skipRoundUserIds.add(source.userMessageId)
+            }
+            healAttempts += 1
+            continue
+          }
+          if (isTooManyImagesError(error)) {
+            const oldestImageIds = builtSourceEntries
+              .flatMap((entry) =>
+                entry.kind === 'historyUser'
+                  ? entry.sentFiles.filter((file) => file.isImage).map((file) => file.id)
+                  : []
+              )
+              .filter((id) => !skippedHistoryFileIds.has(id))
+              .slice(0, 8)
+            if (oldestImageIds.length > 0) {
+              oldestImageIds.forEach((id) => skippedHistoryFileIds.add(id))
+              healAttempts += 1
+              continue
+            }
+          }
+          if (isContextOverflowError(error) && builtRoundCount > 1) {
+            dropLeadingRounds += Math.max(1, Math.ceil(builtRoundCount * 0.35))
+            healAttempts += 1
+            continue
+          }
         }
         if (error instanceof ApiError && error.kind === 'interrupted' && reply.stopReason) {
           // 已收到 message_delta 的结束原因，只是缺了结尾的 message_stop

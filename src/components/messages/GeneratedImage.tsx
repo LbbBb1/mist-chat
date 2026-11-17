@@ -18,6 +18,8 @@ import {
 } from '../base/icons.js'
 import { ImageSizePicker } from './ImageSizePicker.js'
 import { openImageViewer } from './imageViewerState.js'
+import { showToast } from '../base/toastState.js'
+import { saveDownloadedUrl } from '../../utils/download.js'
 import styles from './AssistantMessage.module.css'
 
 /**
@@ -155,10 +157,15 @@ export const GeneratedImage = ({
       : 'png'
 
   const download = () => {
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `generated-${block.fileId.slice(0, 8)}.${ext}`
-    anchor.click()
+    void saveDownloadedUrl(url, `generated-${block.fileId.slice(0, 8)}.${ext}`)
+      .then((dest) => {
+        if (dest === 'browser') {
+          showToast({ key: 'imageSavedToast' })
+        }
+      })
+      .catch(() => {
+        showToast({ key: 'imageSaveFailedToast' })
+      })
   }
 
   return (

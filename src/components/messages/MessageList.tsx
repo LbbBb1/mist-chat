@@ -1,3 +1,4 @@
+import clsx from 'clsx'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useIsMobile } from '../../app/viewport.js'
 import {
@@ -8,6 +9,7 @@ import {
 import { selectMessageVersion } from '../../services/chat/store.js'
 import type { Session } from '../../services/chat/types.js'
 import { closeSearchPanel } from '../search/searchPanelState.js'
+import { clearSearchScrollTarget, useSessionSearch } from '../sider/sessionSearchState.js'
 import { AssistantMessage } from './AssistantMessage.js'
 import { ScrollToBottomContext } from './scrollContext.js'
 import { UserMessage } from './UserMessage.js'
@@ -48,6 +50,8 @@ export const MessageList = ({
   const stickyRef = useRef(true)
   const scrollTopRef = useRef(0)
   const restoreScrollRef = useRef<{ messageId: string; top: number } | null>(null)
+  const targetScroll = useSessionSearch((state) => state.targetScroll)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const messages = getVisibleMessages(session)
   const [previousVersions, setPreviousVersions] = useState(() =>
     buildMessageVersions(session, new Map())
@@ -95,9 +99,44 @@ export const MessageList = ({
       restoreScrollRef.current = null
       return
     }
+    if (targetScroll?.sessionId === session.id) {
+      stickyRef.current = false
+      return
+    }
     stickyRef.current = true
     scrollToBottom()
-  }, [session.id, lastMessageId, scrollToBottom])
+  }, [session.id, lastMessageId, scrollToBottom, targetScroll])
+
+  useEffect(() => {
+    if (!targetScroll || targetScroll.sessionId !== session.id) {
+      return
+    }
+    const scroll = scrollRef.current
+    if (!scroll) {
+      return
+    }
+    const targetEl = scroll.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(targetScroll.messageId)}"]`
+    )
+    if (!targetEl) {
+      return
+    }
+    stickyRef.current = false
+    const scrollRect = scroll.getBoundingClientRect()
+    const targetRect = targetEl.getBoundingClientRect()
+    const nextTop =
+      scroll.scrollTop +
+      (targetRect.top - scrollRect.top) -
+      Math.max(24, (scroll.clientHeight - targetRect.height) * 0.32)
+    scroll.scrollTop = Math.max(0, nextTop)
+    scrollTopRef.current = scroll.scrollTop
+    setHighlightedId(targetScroll.messageId)
+    clearSearchScrollTarget(targetScroll.nonce)
+    const timer = window.setTimeout(() => {
+      setHighlightedId((current) => (current === targetScroll.messageId ? null : current))
+    }, 1800)
+    return () => window.clearTimeout(timer)
+  }, [session.id, messages, targetScroll])
 
   useEffect(closeSearchPanel, [session.id, lastMessageId])
 
@@ -146,32 +185,36 @@ export const MessageList = ({
       <div ref={isMobile ? undefined : scrollRef} className={styles.container}>
         <div ref={isMobile ? scrollRef : undefined} className={styles.scroll}>
           <div ref={contentRef} className={styles.column}>
-            {messages.map((message, index) =>
-              message.role === 'user' ? (
-                <UserMessage
-                  key={message.id}
-                  sessionId={session.id}
-                  message={message}
-                  retryUploadId={uploadRetryId}
-                  isFirst={index === 0}
-                  isLast={index === lastIndex || index === lastIndex - 1}
-                  busy={streaming}
-                  versions={versions.get(message.id) ?? EMPTY_VERSIONS}
-                  onSelectVersion={selectVersion}
-                />
-              ) : (
-                <AssistantMessage
-                  key={message.id}
-                  sessionId={session.id}
-                  message={message}
-                  isLast={index === lastIndex}
-                  streaming={streaming && index === lastIndex}
-                  busy={streaming}
-                  versions={versions.get(message.id) ?? EMPTY_VERSIONS}
-                  onSelectVersion={selectVersion}
-                />
-              )
-            )}
+            {messages.map((message, index) => (
+              <div
+                key={message.id}
+                data-message-id={message.id}
+                className={clsx(highlightedId === message.id && styles.searchHighlight)}
+              >
+                {message.role === 'user' ? (
+                  <UserMessage
+                    sessionId={session.id}
+                    message={message}
+                    retryUploadId={uploadRetryId}
+                    isFirst={index === 0}
+                    isLast={index === lastIndex || index === lastIndex - 1}
+                    busy={streaming}
+                    versions={versions.get(message.id) ?? EMPTY_VERSIONS}
+                    onSelectVersion={selectVersion}
+                  />
+                ) : (
+                  <AssistantMessage
+                    sessionId={session.id}
+                    message={message}
+                    isLast={index === lastIndex}
+                    streaming={streaming && index === lastIndex}
+                    busy={streaming}
+                    versions={versions.get(message.id) ?? EMPTY_VERSIONS}
+                    onSelectVersion={selectVersion}
+                  />
+                )}
+              </div>
+            ))}
           </div>
         </div>
         {footer}

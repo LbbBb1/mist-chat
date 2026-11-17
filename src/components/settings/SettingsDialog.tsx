@@ -23,12 +23,18 @@ import { regionCodes, getRegionName, provinces } from '../../services/location.j
 import {
   isChineseBrowser,
   setAutoCheckUpdate,
+  setAvatarDataUrl,
+  setAvatarEnabled,
+  setAvatarShape,
+  setAvatarSize,
+  setCollapseThinking,
   setDailyTokenLimit,
   setLocale,
   setLocation,
   setThemePreference,
   setTokenLimitEnabled,
   setTtsVoice,
+  setVoiceAutoSend,
   useSettings,
   type ThemePreference,
 } from '../../services/settings.js'
@@ -53,7 +59,9 @@ import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
+import { saveDownloadedBlob } from '../../utils/download.js'
 import { useApiKeyEditor } from './ApiKeyField.js'
+import { AvatarCropModal } from './AvatarCropModal.js'
 import { MemorySettings } from './MemorySettings.js'
 import { ModelSettings } from './ModelSettings.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
@@ -132,6 +140,9 @@ const SettingsContent = () => {
               <ThemeSetting />
               <LocaleSetting />
               <TtsVoiceSetting />
+              <VoiceAutoSendSetting />
+              <AvatarSetting />
+              <CollapseThinkingSetting />
               <LocationSetting />
               <TokenLimitSetting />
               <UpdateSetting />
@@ -521,6 +532,177 @@ const TtsVoiceSetting = () => {
   )
 }
 
+const VoiceAutoSendSetting = () => {
+  const t = useTranslate()
+  const voiceAutoSend = useSettings((state) => state.voiceAutoSend)
+  return (
+    <SettingCell
+      label={t('voiceAutoSendLabel')}
+      description={t('voiceAutoSendDesc')}
+      status={null}
+      action={
+        <button
+          type="button"
+          role="switch"
+          aria-checked={voiceAutoSend}
+          aria-label={t('voiceAutoSendLabel')}
+          className={styles.switch}
+          onClick={() => setVoiceAutoSend(!voiceAutoSend)}
+        >
+          <span className={styles.switchThumb} />
+        </button>
+      }
+    />
+  )
+}
+
+const AvatarSetting = () => {
+  const t = useTranslate()
+  const avatarEnabled = useSettings((state) => state.avatarEnabled)
+  const avatarDataUrl = useSettings((state) => state.avatarDataUrl)
+  const avatarShape = useSettings((state) => state.avatarShape)
+  const avatarSize = useSettings((state) => state.avatarSize)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [cropFile, setCropFile] = useState<File | null>(null)
+
+  return (
+    <>
+      <SettingCell
+        label={t('avatarSectionLabel')}
+        description={t('avatarSectionDesc')}
+        status={null}
+        action={
+          <button
+            type="button"
+            role="switch"
+            aria-checked={avatarEnabled}
+            aria-label={t('avatarSectionLabel')}
+            className={styles.switch}
+            onClick={() => setAvatarEnabled(!avatarEnabled)}
+          >
+            <span className={styles.switchThumb} />
+          </button>
+        }
+      />
+      {avatarEnabled ? (
+        <div className={styles.cell}>
+          <div className={styles.avatarConfigPanel}>
+            <div className={styles.avatarControlRow}>
+              <div className={styles.fetchRow}>
+                {avatarDataUrl ? (
+                  <img
+                    src={avatarDataUrl}
+                    alt=""
+                    className={clsx(
+                      styles.avatarPreview,
+                      avatarShape === 'circle' ? styles.avatarCircle : styles.avatarSquare
+                    )}
+                    style={{ width: avatarSize, height: avatarSize }}
+                  />
+                ) : null}
+                <Button variant="outlined" size="m" onClick={() => fileInputRef.current?.click()}>
+                  {t('avatarImportButton')}
+                </Button>
+                {avatarDataUrl ? (
+                  <Button variant="dangerOutlined" size="m" onClick={() => setAvatarDataUrl('')}>
+                    {t('avatarClearButton')}
+                  </Button>
+                ) : null}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null
+                  event.target.value = ''
+                  if (file) {
+                    setCropFile(file)
+                  }
+                }}
+              />
+            </div>
+            <div className={styles.avatarControlRow}>
+              <span className={styles.label}>{t('avatarShapeLabel')}</span>
+              <div className={styles.presetRow}>
+                <button
+                  type="button"
+                  className={clsx(
+                    styles.presetPill,
+                    avatarShape === 'circle' && styles.presetPillActive
+                  )}
+                  onClick={() => setAvatarShape('circle')}
+                >
+                  {t('avatarShapeCircle')}
+                </button>
+                <button
+                  type="button"
+                  className={clsx(
+                    styles.presetPill,
+                    avatarShape === 'square' && styles.presetPillActive
+                  )}
+                  onClick={() => setAvatarShape('square')}
+                >
+                  {t('avatarShapeSquare')}
+                </button>
+              </div>
+            </div>
+            <div className={styles.avatarControlRow}>
+              <span className={styles.label}>{t('avatarSizeLabel', { size: avatarSize })}</span>
+              <input
+                type="range"
+                min={24}
+                max={64}
+                step={2}
+                className={styles.avatarSlider}
+                value={avatarSize}
+                onChange={(event) => setAvatarSize(Number(event.target.value))}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {cropFile ? (
+        <AvatarCropModal
+          file={cropFile}
+          shape={avatarShape}
+          onClose={() => setCropFile(null)}
+          onConfirm={(dataUrl) => {
+            setAvatarDataUrl(dataUrl)
+            setAvatarEnabled(true)
+            setCropFile(null)
+          }}
+        />
+      ) : null}
+    </>
+  )
+}
+
+const CollapseThinkingSetting = () => {
+  const t = useTranslate()
+  const collapseThinking = useSettings((state) => state.collapseThinking)
+  return (
+    <SettingCell
+      label={t('collapseThinkingLabel')}
+      description={t('collapseThinkingDesc')}
+      status={null}
+      action={
+        <button
+          type="button"
+          role="switch"
+          aria-checked={collapseThinking}
+          aria-label={t('collapseThinkingLabel')}
+          className={styles.switch}
+          onClick={() => setCollapseThinking(!collapseThinking)}
+        >
+          <span className={styles.switchThumb} />
+        </button>
+      }
+    />
+  )
+}
+
 /** 覆盖导入的二次确认，叠在设置弹窗上 */
 const ImportConfirm = ({
   historyImport,
@@ -753,12 +935,12 @@ const ExportHistory = ({ disabled }: { disabled: boolean }) => {
     setStatus(null)
     try {
       const { name, blob } = await exportHistory()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = name
-      link.click()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      const dest = await saveDownloadedBlob(blob, name)
+      setStatus(
+        dest === 'android'
+          ? { key: 'historyExportSavedAndroid', params: { name } }
+          : { key: 'historyExportSaved', params: { name } }
+      )
     } catch (error) {
       setStatus(errorStatus('historyExportFailed', error))
     } finally {

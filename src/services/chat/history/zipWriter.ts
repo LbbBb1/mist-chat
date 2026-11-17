@@ -83,27 +83,35 @@ export const writeArchive = async (entries: { name: string; blob: Blob }[]): Pro
       const entry = new ZipPassThrough(name)
       entry.mtime = new Date(1980, 0, 1)
       zip.add(entry)
-      const reader = blob.stream().getReader()
-      let written = 0
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) {
-            break
+      if (typeof blob.stream === 'function') {
+        const reader = blob.stream().getReader()
+        let written = 0
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) {
+              break
+            }
+            written += value.byteLength
+            if (written > blob.size) {
+              invalid()
+            }
+            entry.push(value)
           }
-          written += value.byteLength
-          if (written > blob.size) {
+          if (written !== blob.size) {
             invalid()
           }
-          entry.push(value)
+          entry.push(new Uint8Array(), true)
+        } finally {
+          await reader.cancel().catch(() => {})
+          reader.releaseLock()
         }
-        if (written !== blob.size) {
+      } else {
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        if (bytes.byteLength !== blob.size) {
           invalid()
         }
-        entry.push(new Uint8Array(), true)
-      } finally {
-        await reader.cancel().catch(() => {})
-        reader.releaseLock()
+        entry.push(bytes, true)
       }
     }
     zip.end()
