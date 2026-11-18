@@ -104,6 +104,8 @@ export const en = {
   avatarMenuSettingsDialogThemeSelectDarkOption: 'Dark',
   avatarMenuSettingsDialogThemeSelectSystemOption: 'System',
   apiKeyStart: 'Enter an API Key to get started',
+  apiKeyGetHint: 'No API key yet?',
+  apiKeyGetLink: 'Get one from the official site',
   apiKeyEdit: 'Edit API Key',
   apiKeyPlaceholder: 'Enter API Key',
   apiKeyVerifying: 'Verifying...',
@@ -119,7 +121,7 @@ export const en = {
     'Importing chat history replaces all local chats and attachments. Supports ZIP files exported from DeepSeek.',
   historyImportedOne: 'Imported 1 chat',
   historyImported: 'Imported {count} chats',
-  historyImporting: 'Importing chat history ({count} parsed), please keep settings open...',
+  historyImporting: 'Importing chat history {percent}% ({count} parsed), please keep settings open...',
   historyImportingButton: 'Importing...',
   historyImportReasonFailed: 'Import failed: {message}',
   historyImportFailed:
@@ -137,6 +139,17 @@ export const en = {
   historyDeleted: 'Successfully deleted.',
   historyDeleteFailed: 'Failed to delete chats. Please try again.',
   upload: 'Upload',
+  historyImportFromLink: 'Import from link',
+  historyImportLinkTitle: 'Import chat history from a link',
+  historyImportLinkPlaceholder: 'Paste a ZIP download link (https://…)',
+  historyImportLinkDescription:
+    'Works with directly downloadable ZIP links; the host must allow cross-origin requests.',
+  historyImportLinkDownload: 'Download & import',
+  historyImportLinkBrowser: 'Open in browser',
+  historyImportLinkBrowserHint:
+    'For large files use the browser (faster, no size cap), then come back and tap Upload to pick the downloaded file.',
+  historyImportLinkDownloading: 'Downloading {percent}%',
+  historyImportLinkFailed: 'Download failed: {message}',
   uploadUnsupportedFormat:
     'The selected files include unsupported formats. Please convert them and try again. Supported: PDF, DOC, XLSX, PPT, images, text, code, and more.',
   uploadFileStatusFailed: 'Upload failed',
@@ -454,4 +467,5 @@ export const en = {
   searchSessionsEmpty: 'No matching chats or messages',
   searchSessionsScanning: 'Searching chat history…',
   searchResultTitleMatch: 'Matched chat title',
+  loadEarlierMessages: 'Show {count} earlier messages',
 } satisfies Record<keyof typeof zh, string>

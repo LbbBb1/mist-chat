@@ -102,13 +102,27 @@ export const checkArchiveFormat = async (file: File): Promise<string> => {
   return fail('backupUnrecognized')
 }
 
+export type ImportProgress = {
+  /** 0–1，按已读取的压缩字节计算 */
+  ratio: number
+  /** 已解析并写入暂存的会话数 */
+  sessions: number
+  /** 已读取的压缩字节 */
+  bytesRead: number
+  /** 归档总压缩字节 */
+  totalBytes: number
+}
+
+/** 进度回调的最小间隔；大归档每个分块都回调会把主线程刷爆。 */
+const PROGRESS_INTERVAL_MS = 100
+
 /**
  * 流式导入：支持标准 DeepSeek 导出顺序及重打包顺序，批量写入暂存 IndexedDB 提升大归档导入速度。
  * 写入导入暂存存储；调用方负责先清空暂存，成功后替换正式数据，失败时清理暂存。
  */
 export const importArchive = async (
   file: File,
-  onProgress?: (sessions: number) => void,
+  onProgress?: (progress: ImportProgress) => void,
   knownRootPrefix?: string
 ): Promise<void> => {
   if (!(await isZipFile(file))) {
@@ -124,6 +138,26 @@ export const importArchive = async (
   let sessionBatch: Session[] = []
   let fileBatch: db.StoredFile[] = []
   let fileBatchBytes = 0
+  let bytesRead = 0
+  let totalBytes = 0
+  let lastEmit = 0
+
+  const emit = (force = false) => {
+    if (!onProgress) {
+      return
+    }
+    const now = performance.now()
+    if (!force && now - lastEmit < PROGRESS_INTERVAL_MS) {
+      return
+    }
+    lastEmit = now
+    onProgress({
+      ratio: totalBytes > 0 ? Math.min(1, bytesRead / totalBytes) : 0,
+      sessions: imported.size,
+      bytesRead,
+      totalBytes,
+    })
+  }
 
   const flushSessions = async () => {
     if (sessionBatch.length === 0) {
@@ -161,7 +195,11 @@ export const importArchive = async (
   }
 
   try {
-    for await (const entry of readArchive(file)) {
+    for await (const entry of readArchive(file, (read, total) => {
+      bytesRead = read
+      totalBytes = total
+      emit()
+    })) {
       if (isJunkEntry(entry.path)) {
         await skipEntry(entry)
         continue
@@ -193,7 +231,7 @@ export const importArchive = async (
         if (sessionBatch.length >= SESSION_BATCH_SIZE) {
           await flushSessions()
         }
-        onProgress?.(imported.size)
+        emit()
       } else if (path === INDEX_PATH && !index) {
         index = readSessionIndex(await readJson(entry))
       } else if (/^chat_sessions\/([^/]+)_files\//.test(path)) {
@@ -209,6 +247,7 @@ export const importArchive = async (
     }
     await flushSessions()
     await flushFiles()
+    emit(true)
   } catch (error) {
     throw error instanceof ArchiveError ? new BackupError('backupIncomplete') : error
   }

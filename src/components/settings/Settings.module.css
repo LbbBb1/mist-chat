@@ -529,6 +529,83 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* 导入进度：细条贴在说明下方，宽度随已读取字节变化 */
+.progressTrack {
+  width: 100%;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  overflow: hidden;
+  background-color: var(--dsw-alias-border-l2);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 2px;
+  background-color: var(--dsw-alias-brand-primary);
+  transition: width 0.2s linear;
+}
+
+/* API Key 下方的一键获取入口 */
+.apiKeyHint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.externalLink {
+  color: var(--dsw-alias-brand-text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.externalLink:hover {
+  text-decoration: underline;
+}
+
+/* 导入行右侧的两个按钮：窄屏竖排，桌面横排 */
+.cellActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 链接导入弹窗 */
+.linkImportBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.linkImportInput {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--ds-control-height-xl);
+  padding: 0 14px;
+  border: none;
+  border-radius: 12px;
+  background-color: var(--dsw-specific-login-input);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.linkImportInput:focus {
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
+}
+
+.linkImportInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+
 .apiKey {
   display: flex;
   flex-direction: column;
@@ -616,11 +693,32 @@
 @media not all and (min-width: 768px) {
   .dialog {
     align-self: flex-end;
+    box-sizing: border-box;
     width: 100%;
+    /* flex item 默认 min-width:auto，会被内部固定宽度的行撑破视口 */
+    min-width: 0;
     max-width: none;
     height: calc(100% - 64px);
     max-height: 800px;
     border-radius: 24px 24px 0 0;
+    /* 左右留白统一由弹层提供，内部内容区不再叠加 padding，避免总宽溢出 */
+    padding-left: 16px;
+    padding-right: 16px;
+    overflow-x: hidden;
+  }
+
+  .dialogMain {
+    min-width: 0;
+  }
+
+  .content {
+    box-sizing: border-box;
+    min-width: 0;
+    /* 桌面的负 margin 是为了贴着滚动条；窄屏下会让内容比视口宽 24px，右侧被裁 */
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
+    overflow-x: hidden;
   }
 
   .dialogMain {

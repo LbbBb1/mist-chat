@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useIsMobile } from '../../app/viewport.js'
+import { useTranslate } from '../../i18n/index.js'
 import {
   buildMessageVersions,
   getVisibleMessages,
@@ -33,6 +34,11 @@ import styles from './MessageList.module.css'
 
 /** 距底部小于该值时视为在底部，流式内容增长时跟随 */
 const STICKY_THRESHOLD = 40
+/**
+ * 单次渲染的消息条数。历史会话动辄数百轮，一次性铺开会让每个 Markdown 块
+ * 同时占内存，长回答叠加时直接压垮渲染进程；只渲染最近若干条，其余按需展开。
+ */
+const PAGE_SIZE = 30
 const EMPTY_VERSIONS: MessageVersions = { ids: [], index: -1 }
 
 export const MessageList = ({
@@ -45,6 +51,7 @@ export const MessageList = ({
   footer: React.ReactNode
 }) => {
   const isMobile = useIsMobile()
+  const t = useTranslate()
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const stickyRef = useRef(true)
@@ -53,6 +60,9 @@ export const MessageList = ({
   const targetScroll = useSessionSearch((state) => state.targetScroll)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const messages = getVisibleMessages(session)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  /** 展开更早消息前记录滚动高度，渲染后补回差值，避免视口跳动。 */
+  const pendingScrollHeightRef = useRef<number | null>(null)
   const [previousVersions, setPreviousVersions] = useState(() =>
     buildMessageVersions(session, new Map())
   )
@@ -63,6 +73,38 @@ export const MessageList = ({
   if (versions !== previousVersions) {
     setPreviousVersions(versions)
   }
+
+  // 切换会话回到最近一屏，避免上一个会话的展开状态串台
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [session.id])
+
+  const startIndex = Math.max(0, messages.length - visibleCount)
+  const hiddenCount = startIndex
+
+  const loadEarlier = useCallback(() => {
+    const el = scrollRef.current
+    if (el) {
+      pendingScrollHeightRef.current = el.scrollHeight
+    }
+    setVisibleCount((count) => Math.min(messages.length, count + PAGE_SIZE))
+  }, [messages.length])
+
+  // 展开后把新增内容的高度补到 scrollTop，视口停在原来看的那一屏
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const previousHeight = pendingScrollHeightRef.current
+    if (!el || previousHeight === null) {
+      return
+    }
+    pendingScrollHeightRef.current = null
+    const delta = el.scrollHeight - previousHeight
+    if (delta > 0) {
+      el.scrollTop += delta
+      scrollTopRef.current = el.scrollTop
+    }
+  })
+
   const lastMessageId = messages.at(-1)?.id
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
@@ -111,6 +153,12 @@ export const MessageList = ({
     if (!targetScroll || targetScroll.sessionId !== session.id) {
       return
     }
+    // 目标在尚未渲染的区间里：先展开到能覆盖它，渲染完成后再定位
+    const targetIndex = messages.findIndex((message) => message.id === targetScroll.messageId)
+    if (targetIndex >= 0 && targetIndex < startIndex) {
+      setVisibleCount(messages.length - targetIndex + PAGE_SIZE)
+      return
+    }
     const scroll = scrollRef.current
     if (!scroll) {
       return
@@ -136,7 +184,7 @@ export const MessageList = ({
       setHighlightedId((current) => (current === targetScroll.messageId ? null : current))
     }, 1800)
     return () => window.clearTimeout(timer)
-  }, [session.id, messages, targetScroll])
+  }, [session.id, messages, targetScroll, startIndex])
 
   useEffect(closeSearchPanel, [session.id, lastMessageId])
 
@@ -185,36 +233,44 @@ export const MessageList = ({
       <div ref={isMobile ? undefined : scrollRef} className={styles.container}>
         <div ref={isMobile ? scrollRef : undefined} className={styles.scroll}>
           <div ref={contentRef} className={styles.column}>
-            {messages.map((message, index) => (
-              <div
-                key={message.id}
-                data-message-id={message.id}
-                className={clsx(highlightedId === message.id && styles.searchHighlight)}
-              >
-                {message.role === 'user' ? (
-                  <UserMessage
-                    sessionId={session.id}
-                    message={message}
-                    retryUploadId={uploadRetryId}
-                    isFirst={index === 0}
-                    isLast={index === lastIndex || index === lastIndex - 1}
-                    busy={streaming}
-                    versions={versions.get(message.id) ?? EMPTY_VERSIONS}
-                    onSelectVersion={selectVersion}
-                  />
-                ) : (
-                  <AssistantMessage
-                    sessionId={session.id}
-                    message={message}
-                    isLast={index === lastIndex}
-                    streaming={streaming && index === lastIndex}
-                    busy={streaming}
-                    versions={versions.get(message.id) ?? EMPTY_VERSIONS}
-                    onSelectVersion={selectVersion}
-                  />
-                )}
-              </div>
-            ))}
+            {hiddenCount > 0 ? (
+              <button type="button" className={styles.loadEarlier} onClick={loadEarlier}>
+                {t('loadEarlierMessages', { count: hiddenCount })}
+              </button>
+            ) : null}
+            {messages.slice(startIndex).map((message, offset) => {
+              const index = startIndex + offset
+              return (
+                <div
+                  key={message.id}
+                  data-message-id={message.id}
+                  className={clsx(highlightedId === message.id && styles.searchHighlight)}
+                >
+                  {message.role === 'user' ? (
+                    <UserMessage
+                      sessionId={session.id}
+                      message={message}
+                      retryUploadId={uploadRetryId}
+                      isFirst={index === 0}
+                      isLast={index === lastIndex || index === lastIndex - 1}
+                      busy={streaming}
+                      versions={versions.get(message.id) ?? EMPTY_VERSIONS}
+                      onSelectVersion={selectVersion}
+                    />
+                  ) : (
+                    <AssistantMessage
+                      sessionId={session.id}
+                      message={message}
+                      isLast={index === lastIndex}
+                      streaming={streaming && index === lastIndex}
+                      busy={streaming}
+                      versions={versions.get(message.id) ?? EMPTY_VERSIONS}
+                      onSelectVersion={selectVersion}
+                    />
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
         {footer}

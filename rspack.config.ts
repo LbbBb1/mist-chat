@@ -308,7 +308,16 @@ export const createConfig = ({
       __DEV_PROXY__: JSON.stringify(dev),
     }),
     new rspack.CopyRspackPlugin({
-      patterns: [{ from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' }],
+      patterns: [
+        { from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' },
+        // PWA 清单与图标：原样输出到 dist 根，供浏览器与 Capacitor 读取
+        {
+          from: path.resolve(root, 'public'),
+          to: '.',
+          globOptions: { ignore: ['**/.DS_Store'] },
+          noErrorOnMissing: true,
+        },
+      ],
     }),
   ],
   performance: { hints: false },

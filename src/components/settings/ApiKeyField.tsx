@@ -92,6 +92,17 @@ export const ApiKeyField = ({ editor }: { editor: ApiKeyEditor }) => {
             ) : null}
           </div>
         ) : null}
+        <div className={styles.apiKeyHint}>
+          <span>{t('apiKeyGetHint')}</span>
+          <a
+            className={styles.externalLink}
+            href="https://platform.deepseek.com/api_keys"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {t('apiKeyGetLink')}
+          </a>
+        </div>
       </div>
     </div>
   )

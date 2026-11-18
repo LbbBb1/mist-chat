@@ -19,6 +19,7 @@ import {
 } from '../../services/chat/backup.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { useChatStore } from '../../services/chat/store.js'
+import { downloadArchive, isDownloadableUrl } from '../../services/chat/download.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
   isChineseBrowser,
@@ -103,6 +104,7 @@ const SettingsContent = () => {
   // 切换分组不丢失正在输入的 API Key 与导入状态
   const apiKeyEditor = useApiKeyEditor()
   const historyImport = useHistoryImport()
+  const [linkImportOpen, setLinkImportOpen] = useState(false)
   const historyDelete = useHistoryDelete()
   const replacingHistory = useChatStore((state) => state.importingHistory)
   const historyBusy = historyImport.busy || historyDelete.busy || replacingHistory
@@ -153,7 +155,11 @@ const SettingsContent = () => {
             <MemorySettings />
           ) : (
             <>
-              <ImportHistory historyImport={historyImport} disabled={historyBusy} />
+              <ImportHistory
+                historyImport={historyImport}
+                disabled={historyBusy}
+                onOpenLink={() => setLinkImportOpen(true)}
+              />
               <ExportHistory disabled={historyBusy} />
               <SettingCell
                 label={t('deleteAllSessions')}
@@ -175,6 +181,15 @@ const SettingsContent = () => {
         </div>
       </Modal>
       {historyImport.file ? <ImportConfirm historyImport={historyImport} /> : null}
+      {linkImportOpen ? (
+        <LinkImportModal
+          onClose={() => setLinkImportOpen(false)}
+          onFile={(file) => {
+            setLinkImportOpen(false)
+            historyImport.select(file)
+          }}
+        />
+      ) : null}
       {historyDelete.opened ? <DeleteAllConfirm historyDelete={historyDelete} /> : null}
     </>
   )
@@ -731,6 +746,132 @@ const ImportConfirm = ({
   )
 }
 
+/**
+ * 从链接导入：先把远端 ZIP 流式下载到内存，再交给覆盖确认流程。
+ * 下载阶段单独显示百分比，失败保留弹窗让用户改地址重试。
+ */
+const LinkImportModal = ({
+  onClose,
+  onFile,
+}: {
+  onClose: () => void
+  onFile: (file: File) => void
+}) => {
+  const t = useTranslate()
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+
+  const close = () => {
+    if (!busy) {
+      onClose()
+    }
+  }
+
+  const start = async () => {
+    if (busy || !isDownloadableUrl(url)) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setProgress(0)
+    try {
+      const file = await downloadArchive(url, (update) => {
+        if (update.total > 0) {
+          setProgress(update.received / update.total)
+        }
+      })
+      onFile(file)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 大文件交给系统浏览器下载：浏览器原生下载器更快，也不受应用内存限制。 */
+  const openInBrowser = () => {
+    if (!isDownloadableUrl(url)) {
+      return
+    }
+    window.open(url.trim(), '_blank', 'noopener,noreferrer')
+  }
+
+  const percent = Math.round(Math.min(1, Math.max(0, progress)) * 100)
+  return (
+    <Modal
+      title={t('historyImportLinkTitle')}
+      className={styles.importConfirm}
+      onClose={close}
+      footer={
+        <>
+          <Button variant="outlined" size="m" disabled={busy} onClick={close}>
+            {t('cancel')}
+          </Button>
+          <Button
+            variant="outlined"
+            size="m"
+            disabled={busy || !isDownloadableUrl(url)}
+            onClick={openInBrowser}
+          >
+            {t('historyImportLinkBrowser')}
+          </Button>
+          <Button
+            variant="primary"
+            size="m"
+            disabled={busy || !isDownloadableUrl(url)}
+            onClick={() => void start()}
+          >
+            {busy
+              ? t('historyImportLinkDownloading', { percent })
+              : t('historyImportLinkDownload')}
+          </Button>
+        </>
+      }
+    >
+      <div className={styles.linkImportBody}>
+        <input
+          className={styles.linkImportInput}
+          type="url"
+          inputMode="url"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus
+          placeholder={t('historyImportLinkPlaceholder')}
+          value={url}
+          disabled={busy}
+          onChange={(event) => setUrl(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              void start()
+            }
+          }}
+        />
+        <div className={styles.description}>{t('historyImportLinkDescription')}</div>
+        <div className={styles.description}>{t('historyImportLinkBrowserHint')}</div>
+        {busy ? (
+          <div
+            className={styles.progressTrack}
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+          >
+            <div className={styles.progressFill} style={{ width: `${percent}%` }} />
+          </div>
+        ) : null}
+        {error ? (
+          <div className={styles.error}>
+            {t('historyImportLinkFailed', { message: error })}
+          </div>
+        ) : null}
+      </div>
+    </Modal>
+  )
+}
+
 const themeOptions: { value: ThemePreference; label: TranslationKey; icon: ReactNode }[] = [
   {
     value: 'light',
@@ -800,14 +941,18 @@ const SettingCell = ({
   status,
   action,
   className,
+  progress,
 }: {
   label: string
   description?: string
   status: Status
   action: ReactNode
   className?: string
+  /** 0–1；有值时在说明下方显示一条进度条 */
+  progress?: number
 }) => {
   const t = useTranslate()
+  const percent = progress === undefined ? 0 : Math.round(Math.min(1, Math.max(0, progress)) * 100)
   return (
     <div className={clsx(styles.cell, styles.row, className)}>
       <div className={styles.text}>
@@ -817,6 +962,18 @@ const SettingCell = ({
             {status
               ? t(status.key, status.reason ? { message: t(status.reason) } : status.params)
               : description}
+          </div>
+        ) : null}
+        {progress !== undefined ? (
+          <div
+            className={styles.progressTrack}
+            role="progressbar"
+            aria-label={label}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+          >
+            <div className={styles.progressFill} style={{ width: `${percent}%` }} />
           </div>
         ) : null}
       </div>
@@ -830,6 +987,8 @@ const useHistoryImport = () => {
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<Status>(null)
+  /** 0–1，按归档已读取的压缩字节计 */
+  const [progress, setProgress] = useState(0)
   const importing = useRef(false)
 
   const confirm = async () => {
@@ -839,17 +998,24 @@ const useHistoryImport = () => {
     importing.current = true
     setFile(null)
     setBusy(true)
-    setStatus({ key: 'historyImporting', params: { count: 0 } })
+    setProgress(0)
+    setStatus({ key: 'historyImporting', params: { count: 0, percent: 0 } })
     try {
-      const count = await importHistory(file, (parsedCount) => {
-        if (parsedCount <= 10 || parsedCount % 10 === 0) {
-          setStatus({ key: 'historyImporting', params: { count: parsedCount } })
+      const count = await importHistory(file, (update) => {
+        setProgress(update.ratio)
+        // 文案不用每帧刷新，但进度条要连续
+        if (update.sessions <= 10 || update.sessions % 10 === 0) {
+          setStatus({
+            key: 'historyImporting',
+            params: { count: update.sessions, percent: Math.round(update.ratio * 100) },
+          })
         }
       })
       const successStatus: Status = {
         key: count === 1 ? 'historyImportedOne' : 'historyImported',
         params: { count },
       }
+      setProgress(1)
       setStatus(successStatus)
       showToast(successStatus)
     } catch (error) {
@@ -873,16 +1039,18 @@ const useHistoryImport = () => {
     }
   }
 
-  return { file, busy, status, select: setFile, cancel: () => setFile(null), confirm }
+  return { file, busy, status, progress, select: setFile, cancel: () => setFile(null), confirm }
 }
 
-/** 导入 = 覆盖：用选中文件替换本地全部会话与附件。 */
+/** 导入 = 覆盖：用选中文件（或链接下载的文件）替换本地全部会话与附件。 */
 const ImportHistory = ({
   historyImport,
   disabled,
+  onOpenLink,
 }: {
   historyImport: ReturnType<typeof useHistoryImport>
   disabled: boolean
+  onOpenLink: () => void
 }) => {
   const t = useTranslate()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -892,8 +1060,9 @@ const ImportHistory = ({
       label={t('historyImport')}
       description={t('historyImportDescription')}
       status={historyImport.status}
+      progress={historyImport.busy ? historyImport.progress : undefined}
       action={
-        <>
+        <div className={styles.cellActions}>
           <Button
             variant="outlined"
             size="m"
@@ -903,6 +1072,15 @@ const ImportHistory = ({
           >
             <IconUploadOutline14 />
             {t(historyImport.busy ? 'historyImportingButton' : 'upload')}
+          </Button>
+          <Button
+            variant="outlined"
+            size="m"
+            className={styles.cellButton}
+            disabled={disabled}
+            onClick={onOpenLink}
+          >
+            {t('historyImportFromLink')}
           </Button>
           <input
             ref={inputRef}
@@ -917,7 +1095,7 @@ const ImportHistory = ({
               }
             }}
           />
-        </>
+        </div>
       }
     />
   )

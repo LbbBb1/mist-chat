@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "project": "DeepChat-main",
+  "reviewedAt": "2026-11-18",
+  "reason": "oss-check 将 src/services/api/openai.ts:622 的 atob() 判为『base64 解码后动态执行』。人工核对：该处是把 data URL 形式的图片 base64 转成 Blob（`new Blob([bytes], {type})`），不存在 eval / Function / 动态代码执行，属启发式误报。",
+  "exceptions": [
+    {
+      "rule": "R202",
+      "file": "src/services/api/openai.ts",
+      "line": 622,
+      "verified": "base64ToBlob(): atob -> Uint8Array -> Blob，仅用于文生图返回的图片数据，无动态执行"
+    }
+  ],
+  "notes": "其余 medium/low 项为常规前端 API 调用与 localStorage 使用，连续使用前已确认无数据外发：构建产物中仅出现 api.deepseek.com / api.openai.com / api.github.com 与 127.0.0.1。"
+}

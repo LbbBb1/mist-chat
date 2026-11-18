@@ -218,6 +218,10 @@
   width: 100%;
   max-width: none;
   border-right: none;
+  box-sizing: border-box;
+  /* 刘海与底部横条：抽屉全屏时留出安全区 */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 
   .listWrap {
     margin-top: 16px;

@@ -126,6 +126,10 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
   ) {
     invalid()
   }
+  // 一次性读入整个中央目录。逐条 slice 读在 WebView 上会产生数千次异步 I/O，
+  // 几百条目的归档光解析目录就能卡上几分钟。
+  const directory = await readBytes(file, offset, size)
+  const dirView = viewOf(directory)
   const entries: Entry[] = []
   const paths = new Set<string>()
   let cursor = 0
@@ -133,18 +137,17 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
     if (cursor + 46 > size) {
       invalid()
     }
-    const view = viewOf(await readBytes(file, offset + cursor, 46))
-    if (view.getUint32(0, true) !== 0x02014b50) {
+    if (dirView.getUint32(cursor, true) !== 0x02014b50) {
       invalid()
     }
-    const flags = view.getUint16(8, true)
-    const method = view.getUint16(10, true)
-    const compressedSize = view.getUint32(20, true)
-    const entrySize = view.getUint32(24, true)
-    const nameLength = view.getUint16(28, true)
-    const extraLength = view.getUint16(30, true)
-    const next = cursor + 46 + nameLength + extraLength + view.getUint16(32, true)
-    const entryOffset = view.getUint32(42, true)
+    const flags = dirView.getUint16(cursor + 8, true)
+    const method = dirView.getUint16(cursor + 10, true)
+    const compressedSize = dirView.getUint32(cursor + 20, true)
+    const entrySize = dirView.getUint32(cursor + 24, true)
+    const nameLength = dirView.getUint16(cursor + 28, true)
+    const extraLength = dirView.getUint16(cursor + 30, true)
+    const next = cursor + 46 + nameLength + extraLength + dirView.getUint16(cursor + 32, true)
+    const entryOffset = dirView.getUint32(cursor + 42, true)
     // 拒绝加密条目（bit 0 / bit 6），仅支持 store（0）与 deflate（8）。
     if (
       flags & 0x41 ||
@@ -153,13 +156,13 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
       entrySize === 0xffffffff ||
       (method === 0 && compressedSize !== entrySize) ||
       entryOffset >= offset ||
-      view.getUint16(34, true) !== 0 ||
-      ((view.getUint32(38, true) >>> 16) & 0xf000) === 0xa000 ||
+      dirView.getUint16(cursor + 34, true) !== 0 ||
+      ((dirView.getUint32(cursor + 38, true) >>> 16) & 0xf000) === 0xa000 ||
       next > size
     ) {
       invalid()
     }
-    const name = await readBytes(file, offset + cursor + 46, nameLength)
+    const name = directory.subarray(cursor + 46, cursor + 46 + nameLength)
     const path = decodePath(name, flags)
     // 目录和同名文件也不能互相覆盖。
     const identity = path.endsWith('/') ? path.slice(0, -1) : path
@@ -167,13 +170,13 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
       invalid()
     }
     paths.add(identity)
-    checkExtra(await readBytes(file, offset + cursor + 46 + nameLength, extraLength))
+    checkExtra(directory.subarray(cursor + 46 + nameLength, cursor + 46 + nameLength + extraLength))
     entries.push({
       path,
       name,
       flags,
       method,
-      crc: view.getUint32(16, true),
+      crc: dirView.getUint32(cursor + 16, true),
       compressedSize,
       size: entrySize,
       offset: entryOffset,
@@ -190,10 +193,19 @@ const readEntryOffset = async (file: File, entry: Entry, boundary: number) => {
   if (entry.offset + 30 > boundary) {
     invalid()
   }
-  const view = viewOf(await readBytes(file, entry.offset, 30))
+  // 头部与「文件名 + extra」一次读入：逐条目两次 slice 读在几百条目的归档上开销很可观。
+  // 目录里已知文件名长度，多读 64 字节覆盖常见 extra 字段，超出再补读。
+  const firstLength = Math.min(30 + entry.name.length + 64, boundary - entry.offset)
+  let head = await readBytes(file, entry.offset, firstLength)
+  let view = viewOf(head)
   const nameLength = view.getUint16(26, true)
   const extraLength = view.getUint16(28, true)
-  const start = entry.offset + 30 + nameLength + extraLength
+  const headLength = 30 + nameLength + extraLength
+  if (headLength > head.length) {
+    head = await readBytes(file, entry.offset, headLength)
+    view = viewOf(head)
+  }
+  const start = entry.offset + headLength
   const end = start + entry.compressedSize
   if (
     view.getUint32(0, true) !== 0x04034b50 ||
@@ -214,7 +226,7 @@ const readEntryOffset = async (file: File, entry: Entry, boundary: number) => {
       invalid()
     }
   }
-  const metadata = await readBytes(file, entry.offset + 30, nameLength + extraLength)
+  const metadata = head.subarray(30, headLength)
   if (entry.name.some((byte, index) => byte !== metadata[index])) {
     invalid()
   }
@@ -246,9 +258,15 @@ export type ArchiveEntry = {
 /**
  * 按条目在文件中的物理顺序逐条、逐块解压，跳过目录条目。
  * 调用方必须消费完当前条目的数据，再请求下一个条目。
+ * onBytes 报告已读取的压缩字节与总压缩字节，用于驱动导入进度。
  */
-export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
+export async function* readArchive(
+  file: File,
+  onBytes?: (readBytes: number, totalBytes: number) => void
+): AsyncGenerator<ArchiveEntry> {
   const directory = await readDirectory(file)
+  const totalBytes = directory.entries.reduce((sum, entry) => sum + entry.compressedSize, 0)
+  let consumedBytes = 0
   for (const [index, entry] of directory.entries.entries()) {
     const boundary = directory.entries[index + 1]?.offset ?? directory.offset
     const start = await readEntryOffset(file, entry, boundary)
@@ -279,6 +297,8 @@ export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
           start + offset,
           Math.min(READ_CHUNK_BYTES, entry.compressedSize - offset)
         )
+        consumedBytes += chunk.length
+        onBytes?.(consumedBytes, totalBytes)
         if (!inflate) {
           append(chunk)
           yield* pending.splice(0)

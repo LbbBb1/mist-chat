@@ -2,8 +2,27 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#15171a" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="format-detection" content="telephone=no,email=no,address=no" />
+    <meta name="description" content="多模型 AI 对话客户端：Bring Your Own Key，对话与密钥只存本机。" />
+
+    <!-- PWA：可安装、独立窗口、离线可用 -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+
+    <!-- iOS 主屏安装：全屏运行并参与安全区布局 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="DeepChat" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
     <title>DeepChat</title>
   </head>
   <body>

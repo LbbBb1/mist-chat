@@ -18,6 +18,8 @@
   "dependencies": {
     "@capacitor/android": "6.2.1",
     "@capacitor/core": "6.2.1",
+    "@capacitor/filesystem": "6.0.1",
+    "@capacitor/ios": "6.2.1",
     "@types/katex": "^0.16.5",
     "@types/mdast": "~4.0.3",
     "@types/prismjs": "^1.26.1",
