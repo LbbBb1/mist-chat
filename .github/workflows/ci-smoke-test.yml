@@ -1,0 +1,22 @@
+name: CI Smoke Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ubuntu-hello:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo
+        run: |
+          echo "ubuntu runner is alive"
+          uname -a
+
+  macos-hello:
+    runs-on: macos-14
+    steps:
+      - name: Echo
+        run: |
+          echo "macos runner is alive"
+          sw_vers
+          xcodebuild -version
