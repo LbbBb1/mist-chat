@@ -72,8 +72,8 @@ export const getAndroidProxyOrigin = (): string | null => {
   if (typeof window === 'undefined') {
     return null
   }
-  const bridge = (window as { __DEEPCHAT_ANDROID_BRIDGE__?: { getProxyOrigin?: () => string } })
-    .__DEEPCHAT_ANDROID_BRIDGE__
+  const bridge = (window as { __MIST_ANDROID_BRIDGE__?: { getProxyOrigin?: () => string } })
+    .__MIST_ANDROID_BRIDGE__
   const origin = bridge?.getProxyOrigin?.()
   return origin && /^http:\/\/127\.0\.0\.1:\d+$/i.test(origin) ? origin : null
 }

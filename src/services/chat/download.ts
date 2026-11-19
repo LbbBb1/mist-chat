@@ -51,7 +51,7 @@ const downloadNative = async (
   url: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<File> => {
-  const path = `deepchat-import-${Date.now()}.zip`
+  const path = `mist-import-${Date.now()}.zip`
   let lastEmit = 0
   const listener = await Filesystem.addListener('progress', (event) => {
     if (event.url && event.url !== url) {

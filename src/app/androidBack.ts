@@ -28,6 +28,6 @@ export const installAndroidBackBridge = () => {
   if (typeof window === 'undefined') {
     return
   }
-  ;(window as { __deepchatHandleAndroidBack?: () => boolean }).__deepchatHandleAndroidBack =
+  ;(window as { __mistHandleAndroidBack?: () => boolean }).__mistHandleAndroidBack =
     dispatchAndroidBack
 }

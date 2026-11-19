@@ -49,8 +49,8 @@ const getAndroidBridge = (): AndroidUpdaterBridge | null => {
     return null
   }
   return (
-    (window as { __DEEPCHAT_ANDROID_BRIDGE__?: AndroidUpdaterBridge })
-      .__DEEPCHAT_ANDROID_BRIDGE__ ?? null
+    (window as { __MIST_ANDROID_BRIDGE__?: AndroidUpdaterBridge })
+      .__MIST_ANDROID_BRIDGE__ ?? null
   )
 }
 
@@ -340,7 +340,7 @@ export const startUpdateInstall = () => {
   const bridge = getAndroidBridge()
   if (current.isAndroid && latest.apkUrl && bridge?.downloadAndInstallApk) {
     writeSkippedVersion('')
-    bridge.downloadAndInstallApk(latest.apkUrl, latest.apkName ?? `DeepChat-v${latest.version}.apk`)
+    bridge.downloadAndInstallApk(latest.apkUrl, latest.apkName ?? `Mist-v${latest.version}.apk`)
     syncAndroidDownloadState()
     stopPollingDownload()
     pollTimer = window.setInterval(syncAndroidDownloadState, 250)

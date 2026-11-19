@@ -17,7 +17,7 @@ const triggerBrowserDownload = (blob: Blob, filename: string): DownloadDestinati
 
 /**
  * 将 Blob 保存到本地：
- * - Android APK 内通过本地原生代理写入系统「下载/DeepChat」（Android 10+）或拉起系统保存选择器（Android 6~9）；
+ * - Android APK 内通过本地原生代理写入系统「下载/Mist」（Android 10+）或拉起系统保存选择器（Android 6~9）；
  * - 浏览器/桌面端通过标准 `<a download>` 触发下载。
  */
 export const saveDownloadedBlob = async (
@@ -27,7 +27,7 @@ export const saveDownloadedBlob = async (
   const androidProxy = getAndroidProxyOrigin()
   if (androidProxy) {
     const mime = blob.type || 'application/octet-stream'
-    const endpoint = `${androidProxy}/__deepchat_save_file?name=${encodeURIComponent(filename)}&mime=${encodeURIComponent(mime)}`
+    const endpoint = `${androidProxy}/__mist_save_file?name=${encodeURIComponent(filename)}&mime=${encodeURIComponent(mime)}`
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {

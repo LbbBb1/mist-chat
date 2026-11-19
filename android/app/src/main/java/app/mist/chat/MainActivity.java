@@ -115,7 +115,7 @@ public class MainActivity extends BridgeActivity {
 
             final String safeName = (fileName != null && !fileName.trim().isEmpty())
                 ? fileName.replaceAll("[^a-zA-Z0-9._-]", "_")
-                : "DeepChat-update.apk";
+                : "Mist-update.apk";
 
             Thread downloadThread = new Thread(() -> {
                 HttpURLConnection conn = null;
@@ -134,7 +134,7 @@ public class MainActivity extends BridgeActivity {
                         conn.setInstanceFollowRedirects(false);
                         conn.setConnectTimeout(15000);
                         conn.setReadTimeout(60000);
-                        conn.setRequestProperty("User-Agent", "DeepChat-Android");
+                        conn.setRequestProperty("User-Agent", "Mist-Android");
                         int code = conn.getResponseCode();
                         if (code >= 300 && code < 400 && redirects < 8) {
                             String loc = conn.getHeaderField("Location");
@@ -188,7 +188,7 @@ public class MainActivity extends BridgeActivity {
                         conn.disconnect();
                     }
                 }
-            }, "DeepChatApkDownloader");
+            }, "MistApkDownloader");
             downloadThread.setDaemon(true);
             downloadThread.start();
         }
@@ -283,7 +283,7 @@ public class MainActivity extends BridgeActivity {
                             //noinspection ResultOfMethodCallIgnored
                             src.delete();
                         }
-                    }, "DeepChatSavePicker").start();
+                    }, "MistSavePicker").start();
                 } else if (src != null && src.exists()) {
                     //noinspection ResultOfMethodCallIgnored
                     src.delete();
@@ -293,7 +293,7 @@ public class MainActivity extends BridgeActivity {
         startLocalProxy();
         super.onCreate(savedInstanceState);
         if (getBridge() != null && getBridge().getWebView() != null) {
-            getBridge().getWebView().addJavascriptInterface(new ProxyBridge(), "__DEEPCHAT_ANDROID_BRIDGE__");
+            getBridge().getWebView().addJavascriptInterface(new ProxyBridge(), "__MIST_ANDROID_BRIDGE__");
             WebSettings settings = getBridge().getWebView().getSettings();
             settings.setMediaPlaybackRequiresUserGesture(false);
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
@@ -307,7 +307,7 @@ public class MainActivity extends BridgeActivity {
                     return;
                 }
                 webView.evaluateJavascript(
-                    "(function(){try{return !!(window.__deepchatHandleAndroidBack && window.__deepchatHandleAndroidBack());}catch(e){return false;}})()",
+                    "(function(){try{return !!(window.__mistHandleAndroidBack && window.__mistHandleAndroidBack());}catch(e){return false;}})()",
                     value -> {
                         if ("true".equals(value)) {
                             return;
@@ -330,7 +330,7 @@ public class MainActivity extends BridgeActivity {
             return;
         }
         lastBackPressAt = now;
-        Toast.makeText(this, "再按一次退出 DeepChat", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "再按一次退出雾语", Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -354,7 +354,7 @@ public class MainActivity extends BridgeActivity {
                         break;
                     }
                 }
-            }, "DeepChatLocalProxy");
+            }, "MistLocalProxy");
             acceptThread.setDaemon(true);
             acceptThread.start();
         } catch (IOException ignored) {
@@ -420,7 +420,7 @@ public class MainActivity extends BridgeActivity {
                 return;
             }
 
-            if ("POST".equals(method) && requestPath.startsWith("/__deepchat_save_file")) {
+            if ("POST".equals(method) && requestPath.startsWith("/__mist_save_file")) {
                 handleSaveFileRequest(requestPath, contentLength, in, out);
                 return;
             }
@@ -567,7 +567,7 @@ public class MainActivity extends BridgeActivity {
         BufferedInputStream in,
         OutputStream out
     ) throws IOException {
-        String fileName = "deepchat-export.bin";
+        String fileName = "mist-export.bin";
         String mimeType = "application/octet-stream";
         int qIndex = requestPath.indexOf('?');
         if (qIndex >= 0) {
@@ -613,7 +613,7 @@ public class MainActivity extends BridgeActivity {
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Downloads.DISPLAY_NAME, safeName);
                 values.put(MediaStore.Downloads.MIME_TYPE, mimeType);
-                values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DeepChat");
+                values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Mist");
                 values.put(MediaStore.MediaColumns.IS_PENDING, 1);
                 Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
                 if (uri != null) {
@@ -636,7 +636,7 @@ public class MainActivity extends BridgeActivity {
                     //noinspection ResultOfMethodCallIgnored
                     tempFile.delete();
                     runOnUiThread(() ->
-                        Toast.makeText(this, "已保存到「下载/DeepChat/" + safeName + "」", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "已保存到「下载/Mist/" + safeName + "」", Toast.LENGTH_LONG).show()
                     );
                     sendJsonOk(out, "{\"ok\":true,\"mode\":\"android\"}");
                     return;
