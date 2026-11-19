@@ -7,6 +7,17 @@
 一个纯前端的 AI 对话客户端：自带 API Key、无后端、对话与密钥只存本机。
 支持 Android / iOS / PWA 三端，内置 DeepSeek 历史对话导入导出。
 
+## 在线使用（PWA）
+
+不需要安装，浏览器打开即可，iOS 可「添加到主屏幕」当 App 用：
+
+| 地址 | 说明 |
+|---|---|
+| **https://deepchat-app.pages.dev/** | Cloudflare Pages（推荐，国内实测 ~600 ms） |
+| https://lbbbb1.github.io/DeepChat/ | GitHub Pages（备用，~1 s） |
+
+三者数据互通方式：各自独立存储，换地址后需重新填 API Key 并导入历史。
+
 ## 与上游的差异
 
 在 `YanJiuWeiYuanHui/DeepChat` v1.0.2 基础上做了以下改动：
