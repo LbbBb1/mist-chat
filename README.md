@@ -14,15 +14,17 @@
 
 不需要安装，浏览器打开即可，iOS 可「添加到主屏幕」当 App 用：
 
-| 地址 | 说明 |
-|---|---|
-| **https://mist-chat.pages.dev/** | Cloudflare Pages（推荐，国内实测 ~600 ms） |
-| https://lbbbb1.github.io/mist-chat/ | GitHub Pages（备用，~1 s） |
-| `?help=1` 后缀 | 安装指引页，可直接发给客户当说明书 |
-| `?guide=1` 后缀 | 使用手册（填 Key、对话、导入导出、常见问题） |
-| `?about=1` 后缀 | 产品说明页（是什么、多少钱、适合谁） |
+| 页面 | 完整地址 | 用途 |
+|---|---|---|
+| 应用本体 | **https://mist-chat.pages.dev/** | 日常使用 |
+| 安装指引 | https://mist-chat.pages.dev/?help=1 | 发给客户当说明书：iPhone 四步、Android 两步 |
+| 使用手册 | https://mist-chat.pages.dev/?guide=1 | 填 Key、三个开关、会话管理、导入导出、常见问题 |
+| 产品说明 | https://mist-chat.pages.dev/?about=1 | 是什么、适合谁、多少钱，发小红书/私信用 |
+| 备用站 | https://lbbbb1.github.io/mist-chat/ | GitHub Pages（~1 s，主站打不开时用） |
 
-三者数据互通方式：各自独立存储，换地址后需重新填 API Key 并导入历史。
+备用站同样支持三个参数，例如 https://lbbbb1.github.io/mist-chat/?help=1 。
+
+各地址独立存储，换地址后需重新填 API Key 并导入历史。
 
 ## 与上游的差异
 

@@ -11,11 +11,12 @@
 
 在线入口：
 
-| 用途 | 地址 |
+| 用途 | 完整地址 |
 |---|---|
 | 应用本体 | https://mist-chat.pages.dev/ |
 | 产品说明 | https://mist-chat.pages.dev/?about=1 |
 | 安装指引 | https://mist-chat.pages.dev/?help=1 |
+| 使用手册 | https://mist-chat.pages.dev/?guide=1 |
 | 备用站 | https://lbbbb1.github.io/mist-chat/ |
 | 仓库 | https://github.com/LbbBb1/mist-chat |
 
