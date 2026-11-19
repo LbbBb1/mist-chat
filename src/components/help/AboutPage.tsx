@@ -49,6 +49,15 @@ const CONTENT = {
         ],
       },
     ],
+    showcaseAfter: '能做什么',
+    shots: {
+      home: '主界面：打开就能问',
+      items: [
+        { src: 'shots/paged.jpg', label: '长会话分页' },
+        { src: 'shots/import.jpg', label: '历史对话导入' },
+        { src: 'shots/settings.jpg', label: '设置项' },
+      ],
+    },
     faq: {
       title: '常见问题',
       items: [
@@ -127,6 +136,15 @@ const CONTENT = {
         ],
       },
     ],
+    showcaseAfter: 'What it does',
+    shots: {
+      home: 'Home screen: just ask',
+      items: [
+        { src: 'shots/paged.jpg', label: 'Paged long chats' },
+        { src: 'shots/import.jpg', label: 'History import' },
+        { src: 'shots/settings.jpg', label: 'Settings' },
+      ],
+    },
     faq: {
       title: 'Questions',
       items: [
@@ -210,6 +228,23 @@ export const AboutPage = () => {
                   </li>
                 ))}
               </ol>
+            ) : null}
+            {/* 「能做什么」之后插入截图 */}
+            {section.title === text.showcaseAfter ? (
+              <>
+                <figure className={styles.shotHero}>
+                  <img src="shots/home.jpg" alt={text.shots.home} loading="lazy" />
+                  <figcaption>{text.shots.home}</figcaption>
+                </figure>
+                <div className={styles.shotStrip}>
+                  {text.shots.items.map((item) => (
+                    <figure key={item.src} className={styles.shotItem}>
+                      <img src={item.src} alt={item.label} loading="lazy" />
+                      <figcaption>{item.label}</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              </>
             ) : null}
           </section>
         ))}

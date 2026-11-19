@@ -258,3 +258,57 @@
   white-space: nowrap;
   font-weight: 500;
 }
+/* ---- 截图展示 ---- */
+.shotHero {
+  margin: 14px 0 12px;
+  text-align: center;
+}
+
+.shotHero img {
+  width: 100%;
+  max-width: 190px;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background-color: var(--dsw-alias-bg-l2);
+}
+
+.shotHero figcaption {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.shotStrip {
+  display: flex;
+  gap: 10px;
+  margin: 0 -16px;
+  padding: 0 16px 6px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.shotItem {
+  flex: 0 0 auto;
+  width: 132px;
+  margin: 0;
+  scroll-snap-align: start;
+}
+
+.shotItem img {
+  width: 132px;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background-color: var(--dsw-alias-bg-l2);
+}
+
+.shotItem figcaption {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
