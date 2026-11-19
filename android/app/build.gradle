@@ -7,8 +7,8 @@ android {
         applicationId "app.mist.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode(project.hasProperty('MistVersionCode') ? project.property('MistVersionCode').toString().toInteger() : 3)
-        versionName(project.hasProperty('MistVersionName') ? project.property('MistVersionName').toString() : '1.0.2')
+        versionCode(project.hasProperty('mistVersionCode') ? project.property('mistVersionCode').toString().toInteger() : 3)
+        versionName(project.hasProperty('mistVersionName') ? project.property('mistVersionName').toString() : '1.0.2')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
