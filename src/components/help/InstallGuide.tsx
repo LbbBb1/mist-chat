@@ -115,6 +115,7 @@ export const InstallGuide = () => {
 
   return (
     <div className={styles.page}>
+      <div className={styles.inner}>
       <header className={styles.header}>
         <h1 className={styles.title}>{text.title}</h1>
         <p className={styles.lead}>{text.lead}</p>
@@ -163,6 +164,18 @@ export const InstallGuide = () => {
       <button type="button" className={styles.back} onClick={openApp}>
         {text.back}
       </button>
+
+      <footer className={styles.footer}>
+        <a
+          className={styles.footerLink}
+          href="https://github.com/LbbBb1/mist-chat"
+          target="_blank"
+          rel="noreferrer"
+        >
+          github.com/LbbBb1/mist-chat
+        </a>
+      </footer>
+      </div>
     </div>
   )
 }
