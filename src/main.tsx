@@ -10,6 +10,25 @@ import './app/global.css'
 ensureKatex()
 setupTheme()
 
+/**
+ * 只在浏览器里注册 Service Worker：
+ * - 原生壳（Capacitor）自带本地资源，不需要缓存层，注册反而会拖慢更新
+ * - file:// 打开时也不支持
+ */
+const registerServiceWorker = () => {
+  const isNative = (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+  if (isNative || !('serviceWorker' in navigator) || window.location.protocol === 'file:') {
+    return
+  }
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // 注册失败不影响主流程
+    })
+  })
+}
+
+registerServiceWorker()
+
 createRoot(document.getElementById('root') as HTMLElement).render(
   <ErrorBoundary>
     <App />
