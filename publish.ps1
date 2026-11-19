@@ -2,18 +2,18 @@
   一键发布到 GitHub。
 
   前置：先在网页上创建空仓库（或 fork 原仓库）：
-    https://github.com/new            新建空仓库，名字填 DeepChat，不要勾选 README
+    https://github.com/new            新建空仓库，名字填 mist-chat，不要勾选 README
     或
     https://github.com/YanJiuWeiYuanHui/DeepChat/fork   直接 fork，仓库名保持 DeepChat
 
   然后在本目录运行：
-    powershell -ExecutionPolicy Bypass -File .\publish.ps1 -Repo DeepChat
+    powershell -ExecutionPolicy Bypass -File .\publish.ps1 -Repo mist-chat
 
   首次会弹出浏览器要求登录 GitHub（Git Credential Manager），登录一次之后不再需要。
 #>
 param(
   [string]$Owner = "LbbBb1",
-  [string]$Repo  = "DeepChat",
+  [string]$Repo  = "mist-chat",
   [string]$Branch = "main"
 )
 
@@ -49,7 +49,7 @@ if ($LASTEXITCODE -eq 0) {
 接下来手动上传安装包：
   1. 打开 https://github.com/$Owner/$Repo/releases/new
   2. Tag 填 v1.2.3，标题填 DeepChat v1.2.3
-  3. 把 release\DeepChat-1.2.3-release.apk 拖进附件区
+  3. 把 release\Mist-1.2.8-release.apk 拖进附件区
   4. 正文可从 release\README.md 复制
 "@ -ForegroundColor Cyan
 } else {

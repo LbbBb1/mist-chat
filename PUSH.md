@@ -4,8 +4,8 @@
 
 | 项 | 地址 |
 |---|---|
-| 仓库 | https://github.com/LbbBb1/DeepChat |
-| Release | https://github.com/LbbBb1/DeepChat/releases/tag/v1.2.3 |
+| 仓库 | https://github.com/LbbBb1/mist-chat |
+| Release | https://github.com/LbbBb1/mist-chat/releases/tag/v1.2.3 |
 
 GitHub 在仓库标题下方会显示 **forked from YanJiuWeiYuanHui/DeepChat**（因为是用 `gh repo fork` 创建的）。
 
@@ -35,8 +35,8 @@ git push
 
 # 2. 发版
 & $gh release create v1.2.4 <apk路径> `
-  --repo LbbBb1/DeepChat `
-  --title "DeepChat v1.2.4" `
+  --repo LbbBb1/mist-chat `
+  --title "Mist v1.2.9" `
   --notes "更新说明"
 ```
 
