@@ -1,6 +1,6 @@
 {
-  "name": "DeepChat",
-  "short_name": "DeepChat",
+  "name": "Mist",
+  "short_name": "Mist",
   "description": "多模型 AI 对话客户端：Bring Your Own Key，对话与密钥只存本机。",
   "id": "/",
   "start_url": "index.html",

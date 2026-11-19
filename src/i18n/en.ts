@@ -14,7 +14,7 @@ export const en = {
     'Chats or attachments have not been saved locally. Retry before closing this page.',
   sessionDeleteFailed: 'Unable to delete this chat. Please try again.',
   settings: 'Settings',
-  appName: 'DeepChat',
+  appName: 'Mist',
   deleteSessionModalContentTitle: 'Delete chat?',
   deleteSessionWithFilesDescription:
     'This chat and its uploaded files will be permanently deleted and cannot be recovered. Delete this chat?',
@@ -384,7 +384,7 @@ export const en = {
   updateDownloadingUnknown: 'Downloading package ({downloaded} MB)',
   updateInstalling: 'Package ready. Confirm "Update" in the Android installer.',
   updatePermissionRequired:
-    'Enable "Install unknown apps" for DeepChat in system settings, then return to continue.',
+    'Enable "Install unknown apps" for Mist in system settings, then return to continue.',
   updateRetryInstall: 'Permission granted, install now',
   updateOpenInBrowser: 'Download in browser',
   updateViewAnnouncement: 'View release notes',
@@ -436,7 +436,7 @@ export const en = {
   voiceHoldCancelHint: 'Release to cancel',
   voiceHoldTranscribing: 'Transcribing voice…',
   historyExportSaved: 'Exported and started download: {name}',
-  historyExportSavedAndroid: 'Saved to Download/DeepChat/{name}',
+  historyExportSavedAndroid: 'Saved to Download/Mist/{name}',
   imageSavedToast: 'Image saved',
   imageSaveFailedToast: 'Failed to save image',
   voiceAutoSendLabel: 'Auto-send after voice input',

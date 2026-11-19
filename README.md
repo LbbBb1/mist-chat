@@ -1,8 +1,11 @@
-# DeepChat · 社区改造版
+# 雾语 Mist
 
 > **本仓库 fork 自 [YanJiuWeiYuanHui/DeepChat](https://github.com/YanJiuWeiYuanHui/DeepChat)，**
 > **而上游又是 [deepseek-ai/chat-demo](https://github.com/deepseek-ai/chat-demo)（DeepSeek 官方开源前端，MIT）的派生。**
 > 原始版权与许可保持不变，见 [LICENSE](LICENSE)。
+>
+> 本分支在上游基础上做了移动端增强并改用独立品牌「雾语 / Mist」，
+> 与 DeepSeek 官方无隶属关系，不使用其商标与图标。
 
 一个纯前端的 AI 对话客户端：自带 API Key、无后端、对话与密钥只存本机。
 支持 Android / iOS / PWA 三端，内置 DeepSeek 历史对话导入导出。
@@ -13,8 +16,9 @@
 
 | 地址 | 说明 |
 |---|---|
-| **https://deepchat-app.pages.dev/** | Cloudflare Pages（推荐，国内实测 ~600 ms） |
-| https://lbbbb1.github.io/DeepChat/ | GitHub Pages（备用，~1 s） |
+| **https://mist-chat.pages.dev/** | Cloudflare Pages（推荐，国内实测 ~600 ms） |
+| https://lbbbb1.github.io/mist-chat/ | GitHub Pages（备用，~1 s） |
+| `?help=1` 后缀 | 安装指引页，可直接发给客户当说明书 |
 
 三者数据互通方式：各自独立存储，换地址后需重新填 API Key 并导入历史。
 

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { showToast } from '../components/base/toastState.js'
 import { fetchWithDevProxy } from './api/origin.js'
 
-export const GITHUB_REPO = 'YanJiuWeiYuanHui/DeepChat'
+export const GITHUB_REPO = 'LbbBb1/mist-chat'
 export const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPO}`
 export const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`

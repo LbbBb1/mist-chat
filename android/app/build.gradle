@@ -1,14 +1,14 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "com.deepchat.app"
+    namespace "app.mist.chat"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.deepchat.app"
+        applicationId "app.mist.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode(project.hasProperty('deepchatVersionCode') ? project.property('deepchatVersionCode').toString().toInteger() : 3)
-        versionName(project.hasProperty('deepchatVersionName') ? project.property('deepchatVersionName').toString() : '1.0.2')
+        versionCode(project.hasProperty('MistVersionCode') ? project.property('MistVersionCode').toString().toInteger() : 3)
+        versionName(project.hasProperty('MistVersionName') ? project.property('MistVersionName').toString() : '1.0.2')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -18,11 +18,11 @@ android {
     }
     signingConfigs {
         release {
-            def ksPath = System.getenv('DEEPCHAT_KEYSTORE_FILE') ?: "${System.getProperty('user.home')}/.android/debug.keystore"
+            def ksPath = System.getenv('MIST_KEYSTORE_FILE') ?: "${System.getProperty('user.home')}/.android/debug.keystore"
             storeFile file(ksPath)
-            storePassword System.getenv('DEEPCHAT_KEYSTORE_PASS') ?: 'android'
-            keyAlias System.getenv('DEEPCHAT_KEY_ALIAS') ?: 'androiddebugkey'
-            keyPassword System.getenv('DEEPCHAT_KEY_PASS') ?: 'android'
+            storePassword System.getenv('MIST_KEYSTORE_PASS') ?: 'android'
+            keyAlias System.getenv('MIST_KEY_ALIAS') ?: 'androiddebugkey'
+            keyPassword System.getenv('MIST_KEY_PASS') ?: 'android'
         }
     }
     buildTypes {

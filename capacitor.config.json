@@ -1,6 +1,6 @@
 {
-  "appId": "com.deepchat.app",
-  "appName": "DeepChat",
+  "appId": "app.mist.chat",
+  "appName": "Mist",
   "webDir": "dist",
   "server": {
     "androidScheme": "https",

@@ -1,4 +1,4 @@
-package com.deepchat.app;
+package app.mist.chat;
 
 import android.app.Activity;
 import android.content.ContentResolver;

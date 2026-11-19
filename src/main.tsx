@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './app/App.js'
 import { setupTheme } from './app/theme.js'
 import { ErrorBoundary } from './components/base/ErrorBoundary.js'
+import { InstallGuide } from './components/help/InstallGuide.js'
 import { ensureKatex } from './services/markdown/katex.js'
 import './app/theme.css'
 import './app/global.css'
@@ -29,8 +30,9 @@ const registerServiceWorker = () => {
 
 registerServiceWorker()
 
+// ?help=1 渲染独立的安装指引页，用来直接发给客户当说明书
+const showInstallGuide = new URLSearchParams(window.location.search).get('help') === '1'
+
 createRoot(document.getElementById('root') as HTMLElement).render(
-  <ErrorBoundary>
-    <App />
-  </ErrorBoundary>
+  <ErrorBoundary>{showInstallGuide ? <InstallGuide /> : <App />}</ErrorBoundary>
 )
