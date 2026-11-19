@@ -88,7 +88,6 @@ export type Settings = {
   avatarDataUrl: string
   avatarShape: AvatarShape
   avatarSize: number
-  autoCheckUpdate: boolean
   tokenLimitEnabled: boolean
   dailyTokenLimit: number
   thinking: boolean
@@ -146,7 +145,6 @@ const KEYS = {
   avatarDataUrl: 'chat-demo:avatar-data-url',
   avatarShape: 'chat-demo:avatar-shape',
   avatarSize: 'chat-demo:avatar-size',
-  autoCheckUpdate: 'chat-demo:auto-check-update',
   tokenLimitEnabled: 'chat-demo:token-limit-enabled',
   dailyTokenLimit: 'chat-demo:daily-token-limit',
   thinking: 'chat-demo:thinking',
@@ -348,7 +346,6 @@ export const useSettings = create<Settings>(() => ({
   avatarDataUrl: read(KEYS.avatarDataUrl) ?? '',
   avatarShape: read(KEYS.avatarShape) === 'square' ? 'square' : 'circle',
   avatarSize: Math.min(64, Math.max(24, Math.round(readNumber(KEYS.avatarSize) ?? 36))),
-  autoCheckUpdate: readBool(KEYS.autoCheckUpdate, true),
   tokenLimitEnabled: readBool(KEYS.tokenLimitEnabled, false),
   dailyTokenLimit: Math.max(1000, Math.round(readNumber(KEYS.dailyTokenLimit) ?? 100_000)),
   thinking: read(KEYS.thinking) === 'true',
@@ -437,8 +434,6 @@ export const setAvatarSize = (value: number) => {
   useSettings.setState({ avatarSize })
 }
 
-export const setAutoCheckUpdate = (value: boolean) =>
-  setBoolSetting(KEYS.autoCheckUpdate, 'autoCheckUpdate', value)
 
 export const setTokenLimitEnabled = (value: boolean) =>
   setBoolSetting(KEYS.tokenLimitEnabled, 'tokenLimitEnabled', value)

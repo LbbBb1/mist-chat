@@ -344,8 +344,6 @@ export const zh = {
   tokenUsageSummary: '本次消耗 {total} tokens（输入 {input} · 输出 {output}）',
   updateSectionLabel: '版本与更新',
   updateCurrentVersion: '当前版本：v{version}（{platform}）',
-  updateAutoCheckLabel: '启动时自动检查更新',
-  updateAutoCheckDesc: '从 GitHub Releases 检查新版并展示更新公告，不会强制升级',
   updateCheckButton: '检查更新',
   updateCheckingButton: '检查中...',
   updateModalTitle: '发现新版本 v{version}',

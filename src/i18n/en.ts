@@ -367,8 +367,6 @@ export const en = {
   tokenUsageSummary: '{total} tokens ({input} in · {output} out)',
   updateSectionLabel: 'Version & Updates',
   updateCurrentVersion: 'Current version: v{version} ({platform})',
-  updateAutoCheckLabel: 'Check for updates on launch',
-  updateAutoCheckDesc: 'Fetch GitHub Releases notes automatically without forcing upgrades',
   updateCheckButton: 'Check for updates',
   updateCheckingButton: 'Checking...',
   updateModalTitle: 'Update available: v{version}',
