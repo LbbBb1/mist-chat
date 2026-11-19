@@ -5,6 +5,7 @@ import { setupTheme } from './app/theme.js'
 import { ErrorBoundary } from './components/base/ErrorBoundary.js'
 import { AboutPage } from './components/help/AboutPage.js'
 import { InstallGuide } from './components/help/InstallGuide.js'
+import { UserGuide } from './components/help/UserGuide.js'
 import { ensureKatex } from './services/markdown/katex.js'
 import './app/theme.css'
 import './app/global.css'
@@ -31,12 +32,27 @@ const registerServiceWorker = () => {
 
 registerServiceWorker()
 
-// ?about=1 产品说明页（发给客户看），?help=1 安装步骤页，其余进入应用
+// ?about=1 产品说明，?help=1 安装步骤，?guide=1 使用手册，其余进入应用
 const search = new URLSearchParams(window.location.search)
-const page = search.get('about') === '1' ? 'about' : search.get('help') === '1' ? 'help' : 'app'
+const page =
+  search.get('about') === '1'
+    ? 'about'
+    : search.get('help') === '1'
+      ? 'help'
+      : search.get('guide') === '1'
+        ? 'guide'
+        : 'app'
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <ErrorBoundary>
-    {page === 'about' ? <AboutPage /> : page === 'help' ? <InstallGuide /> : <App />}
+    {page === 'about' ? (
+      <AboutPage />
+    ) : page === 'help' ? (
+      <InstallGuide />
+    ) : page === 'guide' ? (
+      <UserGuide />
+    ) : (
+      <App />
+    )}
   </ErrorBoundary>
 )

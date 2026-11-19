@@ -19,6 +19,8 @@
 | **https://mist-chat.pages.dev/** | Cloudflare Pages（推荐，国内实测 ~600 ms） |
 | https://lbbbb1.github.io/mist-chat/ | GitHub Pages（备用，~1 s） |
 | `?help=1` 后缀 | 安装指引页，可直接发给客户当说明书 |
+| `?guide=1` 后缀 | 使用手册（填 Key、对话、导入导出、常见问题） |
+| `?about=1` 后缀 | 产品说明页（是什么、多少钱、适合谁） |
 
 三者数据互通方式：各自独立存储，换地址后需重新填 API Key 并导入历史。
 
